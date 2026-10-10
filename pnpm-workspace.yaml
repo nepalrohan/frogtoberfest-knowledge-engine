@@ -1,0 +1,10 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+allowBuilds:
+  '@parcel/watcher': false
+  '@scarf/scarf': false
+  '@sentry/cli': false
+  '@swc/core': false
+  protobufjs: false
+  unrs-resolver: false

@@ -1,0 +1,51 @@
+services:
+  jaeger:
+    image: jaegertracing/all-in-one:latest # PIN THE VERSION
+    ports:
+      - '16686:16686'
+      - '4317:4317'
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: frogtoberfest_postgres_dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+      POSTGRES_DB: frogtoberfest
+    ports:
+      - "5432:5432"
+    volumes:
+      - frogtoberfest_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d frogtoberfest" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - frogtoberfest-network
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: frogtoberfest-pgadmin
+    restart: unless-stopped
+
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin123
+
+    ports:
+      - '5050:80'
+
+    depends_on:
+      - postgres
+
+    networks:
+      - frogtoberfest-network
+
+volumes:
+  frogtoberfest_pg_data:
+networks:
+  frogtoberfest-network:
+    driver: bridge
+
