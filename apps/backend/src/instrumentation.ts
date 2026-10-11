@@ -13,27 +13,27 @@ import {
 
 import * as dotenv from 'dotenv';
 import * as path from 'path';
-import { envSchema } from './config/env.validation';
+import { loadConfiguration } from './config/configuration';
 
-// 1. Force load the correct .env file early for validation
+// 1. Load the environment file early for OpenTelemetry initialization
 const envFile = `.env.${process.env.NODE_ENV || 'development'}`;
 dotenv.config({ path: path.resolve(process.cwd(), envFile) });
 
-// 2. Validate using your existing Zod schema
-const parsedEnv = envSchema.parse(process.env);
+// 2. Load configuration object
+const config = loadConfiguration();
 
 export const sdk = new NodeSDK({
   resource: resourceFromAttributes({
-    [ATTR_SERVICE_NAME]: parsedEnv.OTEL_ATTR_SERVICE_NAME,
-    [ATTR_SERVICE_VERSION]: parsedEnv.OTEL_ATTR_SERVICE_VERSION,
+    [ATTR_SERVICE_NAME]: config.otel.serviceName,
+    [ATTR_SERVICE_VERSION]: config.otel.serviceVersion,
   }),
 
   traceExporter: new OTLPTraceExporter({
-    url: parsedEnv.OTEL_EXPORTER_OTLP_ENDPOINT,
+    url: config.otel.exporterEndpoint,
   }),
 
   sampler: new ParentBasedSampler({
-    root: new TraceIdRatioBasedSampler(parsedEnv.OTEL_SAMPLING_RATIO),
+    root: new TraceIdRatioBasedSampler(config.otel.samplingRatio),
   }),
 
   instrumentations: [getNodeAutoInstrumentations()],

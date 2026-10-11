@@ -1,21 +1,25 @@
 import { Controller, Get } from '@nestjs/common';
+import { AppConfigService } from './config';
 import { AppService } from './app.service';
 
 @Controller('health')
 export class AppController {
-  constructor(private readonly appService: AppService) { }
+  constructor(
+    private readonly appService: AppService,
+    private readonly configService: AppConfigService,
+  ) {}
 
   @Get()
   getHello(): string {
     return this.appService.getHello();
   }
 
-  @Get()
+  @Get('status')
   health() {
     return {
       status: 'ok',
       service: 'api',
-      version: process.env.APP_VERSION,
+      version: this.configService.appVersion,
     };
   }
 }

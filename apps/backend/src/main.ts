@@ -7,29 +7,26 @@ import { AppModule } from './app.module';
 import { Logger, ValidationPipe, VersioningType } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import { AppConfigService } from './config';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
 
   const app = await NestFactory.create(AppModule);
-
-  app.enableCors({
-    origin: process.env.WEB_URL,
-    credentials: true,
-  });
-
+  const config = app.get(AppConfigService);
 
   /* Enable CORS */
+  const webUrl = config.webUrl;
+  const corsOrigin = config.corsOrigin;
 
   app.enableCors({
-    origin: process.env.CORS_ORIGIN,
+    origin: corsOrigin === '*' ? webUrl : corsOrigin,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'x-branch-id', 'X-Branch-Id'],
     credentials: true,
   });
 
   /* Global routing and versioning */
-
   app.setGlobalPrefix('api');
 
   app.enableVersioning({ type: VersioningType.URI });
@@ -38,7 +35,6 @@ async function bootstrap() {
   app.useGlobalFilters(new HttpExceptionFilter());
 
   /* Global validation pipe */
-
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
@@ -51,30 +47,20 @@ async function bootstrap() {
   );
 
   /* OpenAPI / Swagger configuration */
-
   const swaggerConfig = new DocumentBuilder()
-    .setTitle('Rani Cake API')
+    .setTitle('Knowledge Engine API')
     .setDescription(
-      'Enterprise Authentication, Branch Isolation, and Administrative API Documentation',
+      'Knowledge Engine - Ingestion, Vector Search, and Grounded Assistant API Documentation',
     )
-    .setVersion('1.0')
+    .setVersion(config.appVersion)
     .addBearerAuth(
       {
         type: 'http',
         scheme: 'bearer',
         bearerFormat: 'JWT',
-        description: 'Better Auth Bearer Token or Session Token',
+        description: 'Bearer Token or Session Token',
       },
       'bearer',
-    )
-    .addApiKey(
-      {
-        type: 'apiKey',
-        in: 'header',
-        name: 'x-branch-id',
-        description: 'Active branch UUID context',
-      },
-      'x-branch-id',
     )
     .build();
 
@@ -85,8 +71,9 @@ async function bootstrap() {
     },
   });
 
-  await app.listen(process.env.PORT ?? 5000);
-  logger.log(`Backend running on http://localhost:${process.env.PORT ?? 5000}/api`);
-  logger.log(`Swagger documentation available at http://localhost:${process.env.PORT ?? 5000}/api/docs`);
+  const port = config.port;
+  await app.listen(port);
+  logger.log(`Backend running on http://localhost:${port}/api`);
+  logger.log(`Swagger documentation available at http://localhost:${port}/api/docs`);
 }
 bootstrap();
