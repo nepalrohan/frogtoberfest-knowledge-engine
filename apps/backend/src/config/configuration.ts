@@ -13,6 +13,13 @@ export interface AppConfiguration {
     exporterEndpoint: string;
     samplingRatio: number;
   };
+  notion: {
+    apiKey: string;
+    apiVersion: string;
+    baseUrl: string;
+    maxDepth: number;
+    maxRequests: number;
+  };
 }
 
 /* Loads raw environment configurations with fallbacks */
@@ -27,6 +34,13 @@ export const loadConfiguration = (): AppConfiguration => ({
     serviceVersion: process.env.OTEL_ATTR_SERVICE_VERSION || '1.0',
     exporterEndpoint: process.env.OTEL_EXPORTER_OTLP_ENDPOINT || 'http://localhost:4317',
     samplingRatio: parseFloat(process.env.OTEL_SAMPLING_RATIO || '1.0'),
+  },
+  notion: {
+    apiKey: process.env.NOTION_API_KEY || '',
+    apiVersion: process.env.NOTION_VERSION || '2022-06-28',
+    baseUrl: process.env.NOTION_BASE_URL || 'https://api.notion.com/v1',
+    maxDepth: parseInt(process.env.NOTION_MAX_DEPTH || '5', 10),
+    maxRequests: parseInt(process.env.NOTION_MAX_REQUESTS || '50', 10),
   },
 });
 
@@ -92,6 +106,24 @@ export class AppConfigService {
           'otel.samplingRatio',
           1.0,
         ),
+      }
+    );
+  }
+
+  get notion(): AppConfiguration['notion'] {
+    return (
+      this.configService.get<AppConfiguration['notion']>('app.notion') ?? {
+        apiKey: this.configService.get<string>('notion.apiKey', ''),
+        apiVersion: this.configService.get<string>(
+          'notion.apiVersion',
+          '2022-06-28',
+        ),
+        baseUrl: this.configService.get<string>(
+          'notion.baseUrl',
+          'https://api.notion.com/v1',
+        ),
+        maxDepth: this.configService.get<number>('notion.maxDepth', 5),
+        maxRequests: this.configService.get<number>('notion.maxRequests', 50),
       }
     );
   }
