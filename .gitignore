@@ -36,3 +36,7 @@ yarn-error.log*
 # Misc
 .DS_Store
 *.pem
+mytask.md
+mytask-list.md
+intestiong-pipeline-plan.md
+ingestion-pipeline-plan.md

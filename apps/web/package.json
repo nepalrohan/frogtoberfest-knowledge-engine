@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
+    "@repo/api-client": "workspace:*",
     "@repo/ui": "workspace:*",
     "@sentry/nextjs": "^10.74.0",
     "@tailwindcss/postcss": "^4.3.3",
