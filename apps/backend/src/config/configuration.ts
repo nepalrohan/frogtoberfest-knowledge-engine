@@ -13,6 +13,28 @@ export interface AppConfiguration {
     exporterEndpoint: string;
     samplingRatio: number;
   };
+  database: {
+    host: string;
+    port: number;
+    username: string;
+    password: string;
+    database: string;
+    ssl: boolean;
+    synchronize: boolean;
+  };
+  redis: {
+    host: string;
+    port: number;
+    password?: string;
+  };
+  embedding: {
+    providerType: 'ollama' | 'remote-gpu';
+    ollamaUrl: string;
+    remoteGpuUrl: string;
+    remoteGpuApiKey?: string;
+    model: string;
+    dimension: number;
+  };
 }
 
 /* Loads raw environment configurations with fallbacks */
@@ -27,6 +49,28 @@ export const loadConfiguration = (): AppConfiguration => ({
     serviceVersion: process.env.OTEL_ATTR_SERVICE_VERSION || '1.0',
     exporterEndpoint: process.env.OTEL_EXPORTER_OTLP_ENDPOINT || 'http://localhost:4317',
     samplingRatio: parseFloat(process.env.OTEL_SAMPLING_RATIO || '1.0'),
+  },
+  database: {
+    host: process.env.DATABASE_HOST || 'localhost',
+    port: parseInt(process.env.DATABASE_PORT || '5432', 10),
+    username: process.env.DATABASE_USER || 'postgres',
+    password: process.env.DATABASE_PASSWORD || 'postgrespassword',
+    database: process.env.DATABASE_NAME || 'frogtoberfest',
+    ssl: process.env.DATABASE_SSL === 'true',
+    synchronize: process.env.DATABASE_SYNCHRONIZE === 'true' || process.env.NODE_ENV !== 'production',
+  },
+  redis: {
+    host: process.env.REDIS_HOST || 'localhost',
+    port: parseInt(process.env.REDIS_PORT || '6379', 10),
+    password: process.env.REDIS_PASSWORD || undefined,
+  },
+  embedding: {
+    providerType: (process.env.EMBEDDING_PROVIDER as 'ollama' | 'remote-gpu') || 'ollama',
+    ollamaUrl: process.env.OLLAMA_URL || 'http://localhost:11434',
+    remoteGpuUrl: process.env.REMOTE_GPU_URL || 'http://localhost:8000',
+    remoteGpuApiKey: process.env.REMOTE_GPU_API_KEY || undefined,
+    model: process.env.EMBEDDING_MODEL || 'nomic-embed-text',
+    dimension: parseInt(process.env.EMBEDDING_DIMENSION || '768', 10),
   },
 });
 
@@ -92,6 +136,41 @@ export class AppConfigService {
           'otel.samplingRatio',
           1.0,
         ),
+      }
+    );
+  }
+
+  get database(): AppConfiguration['database'] {
+    return (
+      this.configService.get<AppConfiguration['database']>('app.database') ?? {
+        host: 'localhost',
+        port: 5432,
+        username: 'postgres',
+        password: 'postgrespassword',
+        database: 'frogtoberfest',
+        ssl: false,
+        synchronize: true,
+      }
+    );
+  }
+
+  get redis(): AppConfiguration['redis'] {
+    return (
+      this.configService.get<AppConfiguration['redis']>('app.redis') ?? {
+        host: 'localhost',
+        port: 6379,
+      }
+    );
+  }
+
+  get embedding(): AppConfiguration['embedding'] {
+    return (
+      this.configService.get<AppConfiguration['embedding']>('app.embedding') ?? {
+        providerType: 'ollama',
+        ollamaUrl: 'http://localhost:11434',
+        remoteGpuUrl: 'http://localhost:8000',
+        model: 'nomic-embed-text',
+        dimension: 768,
       }
     );
   }
