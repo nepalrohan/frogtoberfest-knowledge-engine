@@ -55,6 +55,8 @@ pnpm-lock.yaml
 /.history
 
 .env
+.env.*
+!.env.example
 .env.local
 .env.development
 .env.production

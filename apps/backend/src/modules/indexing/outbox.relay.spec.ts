@@ -102,7 +102,7 @@ describe('OutboxRelayService (Phase 3)', () => {
 
     expect(mockEvent.status).toBe('published');
     expect(mockEvent.publishedAt).toBeInstanceOf(Date);
-    expect(mockManager.save).toHaveBeenCalledWith(mockEvent);
+    expect(mockManager.save).toHaveBeenCalledWith([mockEvent]);
   });
 
   /* Verifies error handling when BullMQ publish fails */
@@ -131,6 +131,49 @@ describe('OutboxRelayService (Phase 3)', () => {
     expect(count).toBe(1);
     expect(mockEvent.retryCount).toBe(1);
     expect(mockEvent.errorMessage).toBe('Redis connection lost');
-    expect(mockManager.save).toHaveBeenCalledWith(mockEvent);
+    expect(mockManager.save).toHaveBeenCalledWith([mockEvent]);
+  });
+
+  /* Verifies concurrent processing via p-limit and Promise.allSettled with mixed outcomes */
+  it('should dispatch multiple events concurrently using Promise.allSettled and handle mixed results', async () => {
+    const successEvent: EmbeddingOutbox = {
+      id: 'outbox-1',
+      documentId: 'doc-1',
+      documentVersion: 1,
+      eventType: 'DOCUMENT_READY_FOR_EMBEDDING',
+      payload: { documentId: 'doc-1', documentVersion: 1, sourceType: 'upload', title: 'Doc 1' },
+      status: 'pending',
+      retryCount: 0,
+      createdAt: new Date(),
+    };
+
+    const failEvent: EmbeddingOutbox = {
+      id: 'outbox-2',
+      documentId: 'doc-2',
+      documentVersion: 1,
+      eventType: 'DOCUMENT_READY_FOR_EMBEDDING',
+      payload: { documentId: 'doc-2', documentVersion: 1, sourceType: 'upload', title: 'Doc 2' },
+      status: 'pending',
+      retryCount: 0,
+      createdAt: new Date(),
+    };
+
+    mockQueryBuilder.getMany.mockResolvedValue([successEvent, failEvent]);
+    mockQueue.add.mockImplementation(async (_jobName, payload) => {
+      if (payload.documentId === 'doc-2') {
+        throw new Error('Redis timeout');
+      }
+      return { id: 'job-1' };
+    });
+
+    const count = await service.pollAndPublishOutbox(50);
+
+    expect(count).toBe(2);
+    expect(successEvent.status).toBe('published');
+    expect(successEvent.publishedAt).toBeInstanceOf(Date);
+    expect(failEvent.status).toBe('pending');
+    expect(failEvent.retryCount).toBe(1);
+    expect(failEvent.errorMessage).toBe('Redis timeout');
+    expect(mockManager.save).toHaveBeenCalledWith([successEvent, failEvent]);
   });
 });
