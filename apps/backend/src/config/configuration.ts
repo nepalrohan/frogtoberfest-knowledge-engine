@@ -35,6 +35,13 @@ export interface AppConfiguration {
     model: string;
     dimension: number;
   };
+  notion: {
+    apiKey: string;
+    apiVersion: string;
+    baseUrl: string;
+    maxDepth: number;
+    maxRequests: number;
+  };
 }
 
 /* Loads raw environment configurations with fallbacks */
@@ -71,6 +78,13 @@ export const loadConfiguration = (): AppConfiguration => ({
     remoteGpuApiKey: process.env.REMOTE_GPU_API_KEY || undefined,
     model: process.env.EMBEDDING_MODEL || 'nomic-embed-text',
     dimension: parseInt(process.env.EMBEDDING_DIMENSION || '768', 10),
+  },
+  notion: {
+    apiKey: process.env.NOTION_API_KEY || '',
+    apiVersion: process.env.NOTION_API_VERSION || '2022-06-28',
+    baseUrl: process.env.NOTION_BASE_URL || 'https://api.notion.com/v1',
+    maxDepth: parseInt(process.env.NOTION_MAX_DEPTH || '5', 10),
+    maxRequests: parseInt(process.env.NOTION_MAX_REQUESTS || '50', 10),
   },
 });
 
@@ -171,6 +185,18 @@ export class AppConfigService {
         remoteGpuUrl: 'http://localhost:8000',
         model: 'nomic-embed-text',
         dimension: 768,
+      }
+    );
+  }
+
+  get notion(): AppConfiguration['notion'] {
+    return (
+      this.configService.get<AppConfiguration['notion']>('app.notion') ?? {
+        apiKey: '',
+        apiVersion: '2022-06-28',
+        baseUrl: 'https://api.notion.com/v1',
+        maxDepth: 5,
+        maxRequests: 50,
       }
     );
   }
