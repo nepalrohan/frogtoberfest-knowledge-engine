@@ -6,6 +6,9 @@ export interface AppConfiguration {
   nodeEnv: string;
   corsOrigin: string;
   webUrl: string;
+  frontendUrl: string;
+  encryptionSecret: string;
+  adminApiKey: string;
   appVersion: string;
   otel: {
     serviceName: string;
@@ -19,6 +22,10 @@ export interface AppConfiguration {
     baseUrl: string;
     maxDepth: number;
     maxRequests: number;
+    clientId: string;
+    clientSecret: string;
+    redirectUri: string;
+    authorizationUrl: string;
   };
 }
 
@@ -28,6 +35,10 @@ export const loadConfiguration = (): AppConfiguration => ({
   nodeEnv: process.env.NODE_ENV || 'development',
   corsOrigin: process.env.CORS_ORIGIN || '*',
   webUrl: process.env.WEB_URL || 'http://localhost:3000',
+  frontendUrl: process.env.FRONTEND_URL || process.env.WEB_URL || 'http://localhost:3000',
+  encryptionSecret:
+    process.env.ENCRYPTION_SECRET || 'knowledge-engine-secret-key-32b-min!',
+  adminApiKey: process.env.ADMIN_API_KEY || 'default-admin-api-key-for-dev',
   appVersion: process.env.APP_VERSION || '1.0.0',
   otel: {
     serviceName: process.env.OTEL_ATTR_SERVICE_NAME || 'Knowledge_Engine',
@@ -41,6 +52,15 @@ export const loadConfiguration = (): AppConfiguration => ({
     baseUrl: process.env.NOTION_BASE_URL || 'https://api.notion.com/v1',
     maxDepth: parseInt(process.env.NOTION_MAX_DEPTH || '5', 10),
     maxRequests: parseInt(process.env.NOTION_MAX_REQUESTS || '50', 10),
+    clientId: process.env.NOTION_CLIENT_ID || 'notion-client-id-default',
+    clientSecret:
+      process.env.NOTION_CLIENT_SECRET || 'notion-client-secret-default',
+    redirectUri:
+      process.env.NOTION_REDIRECT_URI ||
+      'http://localhost:5000/api/v1/integrations/notion/oauth/callback',
+    authorizationUrl:
+      process.env.NOTION_AUTH_URL ||
+      'https://api.notion.com/v1/oauth/authorize',
   },
 });
 
@@ -77,6 +97,34 @@ export class AppConfigService {
     return (
       this.configService.get<string>('app.webUrl') ??
       this.configService.get<string>('webUrl', 'http://localhost:3000')
+    );
+  }
+
+  get frontendUrl(): string {
+    return (
+      this.configService.get<string>('app.frontendUrl') ??
+      this.configService.get<string>('frontendUrl') ??
+      this.webUrl
+    );
+  }
+
+  get encryptionSecret(): string {
+    return (
+      this.configService.get<string>('app.encryptionSecret') ??
+      this.configService.get<string>(
+        'encryptionSecret',
+        'knowledge-engine-secret-key-32b-min!',
+      )
+    );
+  }
+
+  get adminApiKey(): string {
+    return (
+      this.configService.get<string>('app.adminApiKey') ??
+      this.configService.get<string>(
+        'adminApiKey',
+        'default-admin-api-key-for-dev',
+      )
     );
   }
 
@@ -124,6 +172,22 @@ export class AppConfigService {
         ),
         maxDepth: this.configService.get<number>('notion.maxDepth', 5),
         maxRequests: this.configService.get<number>('notion.maxRequests', 50),
+        clientId: this.configService.get<string>(
+          'notion.clientId',
+          'notion-client-id-default',
+        ),
+        clientSecret: this.configService.get<string>(
+          'notion.clientSecret',
+          'notion-client-secret-default',
+        ),
+        redirectUri: this.configService.get<string>(
+          'notion.redirectUri',
+          'http://localhost:5000/api/v1/integrations/notion/oauth/callback',
+        ),
+        authorizationUrl: this.configService.get<string>(
+          'notion.authorizationUrl',
+          'https://api.notion.com/v1/oauth/authorize',
+        ),
       }
     );
   }
