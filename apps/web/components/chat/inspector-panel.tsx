@@ -90,11 +90,22 @@ function RunDetailsView({ run }: { run: RunDetails }) {
         <RunRow label="Answer model" value={run.model} />
         <RunRow label="Embedding model" value={run.embeddingModel} />
         {run.rewrittenQuery && <RunRow label="Rewritten query" value={run.rewrittenQuery} />}
+        {run.cachedFromMessageId && <RunRow label="Reused answer" value={run.cachedFromMessageId} />}
         <Separator className="my-1" />
+        <RunRow label="Reranked" value={run.reranked ? "yes" : "no"} />
         <RunRow label="Candidates retrieved" value={run.candidatesRetrieved} />
         <RunRow label="Context tokens" value={run.contextTokens} />
         <RunRow label="Prompt / completion tokens" value={`${run.promptTokens} / ${run.completionTokens}`} />
         <RunRow label="Total latency" value={formatMs(run.totalLatencyMs)} />
+        {run.historyDropped || run.sourcesDropped ? (
+          <RunRow
+            label="Trimmed to fit context"
+            value={`${run.historyDropped ?? 0} history / ${run.sourcesDropped ?? 0} sources`}
+          />
+        ) : null}
+        {run.unsupportedCitations ? (
+          <RunRow label="Unsupported citations removed" value={run.unsupportedCitations} />
+        ) : null}
       </div>
       <div className="space-y-2">
         <p className="text-xs font-medium">Stage timings</p>

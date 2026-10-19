@@ -1,5 +1,6 @@
 import { NotFoundException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
+import { Document } from '../../entities';
 import { ConversationService } from './conversation.service';
 import type { ChatSource, RunDetails } from './chat.types';
 import {
@@ -214,5 +215,121 @@ describeWithDatabase('ConversationService (real Postgres)', () => {
     ).messages;
     expect(question).not.toHaveProperty('status');
     expect(answer).toMatchObject({ content: 'Once upon', status: 'stopped' });
+  });
+
+  describe('retrying an unanswered question', () => {
+    it('reuses the question, drops its stopped answer and keeps earlier history', async () => {
+      const first = await service.beginTurn(null, 'Q1');
+      const id = first.conversation.id;
+      await service.saveAnswer({
+        id: '40000000-0000-0000-0000-000000000001',
+        conversationId: id,
+        content: 'A1',
+        status: 'completed',
+        outcome: 'answered',
+        sources: [],
+      });
+      const failed = await service.beginTurn(id, 'Q2');
+      await service.saveAnswer({
+        id: '40000000-0000-0000-0000-000000000002',
+        conversationId: id,
+        content: 'partial',
+        status: 'stopped',
+        sources: [],
+      });
+
+      const retried = await service.beginTurn(id, 'Q2', failed.userMessage.id);
+
+      expect(retried.userMessage.id).toBe(failed.userMessage.id);
+      expect(retried.history).toEqual([
+        { role: 'user', content: 'Q1' },
+        { role: 'assistant', content: 'A1' },
+      ]);
+      const stored = await service.getConversation(id);
+      expect(stored.messages.map((m) => m.content)).toEqual(['Q1', 'A1', 'Q2']);
+    });
+
+    it('stores a new question when the retried one was already answered', async () => {
+      const first = await service.beginTurn(null, 'Q1');
+      await service.saveAnswer({
+        id: '40000000-0000-0000-0000-000000000003',
+        conversationId: first.conversation.id,
+        content: 'A1',
+        status: 'completed',
+        outcome: 'answered',
+        sources: [],
+      });
+
+      const again = await service.beginTurn(first.conversation.id, 'Q1', first.userMessage.id);
+
+      expect(again.userMessage.id).not.toBe(first.userMessage.id);
+      expect((await service.getConversation(first.conversation.id)).messages).toHaveLength(3);
+    });
+  });
+
+  describe('answer cache', () => {
+    const key = 'a'.repeat(64);
+
+    const storeCachedAnswer = async (documentId: string, documentVersion: number) => {
+      const turn = await service.beginTurn(null, 'How do I roll back?');
+      await service.saveAnswer({
+        id: '60000000-0000-0000-0000-000000000001',
+        conversationId: turn.conversation.id,
+        content: 'Redeploy the tag [Source 1].',
+        status: 'completed',
+        outcome: 'answered',
+        sources: [{ ...source(1, true), documentId, documentVersion }],
+        run,
+        answerCacheKey: key,
+      });
+    };
+
+    const seedDocument = (version: number, deletedAt?: Date) =>
+      dataSource.getRepository(Document).save({
+        sourceType: 'text',
+        sourceId: `deploy-${version}-${Date.now()}`,
+        title: 'Deployment Guide',
+        normalizedContent: 'x',
+        contentHash: `hash-${version}-${Date.now()}`,
+        version,
+        syncStatus: 'indexed',
+        metadata: {},
+        deletedAt,
+      });
+
+    beforeEach(async () => {
+      await truncate(dataSource, ['document']);
+    });
+
+    it('returns a fresh answer whose cited documents are unchanged', async () => {
+      const doc = await seedDocument(3);
+      await storeCachedAnswer(doc.id, 3);
+
+      expect(await service.findCachedAnswer(key, 3600)).toMatchObject({
+        messageId: '60000000-0000-0000-0000-000000000001',
+        content: 'Redeploy the tag [Source 1].',
+        run: { model: 'qwen2.5:7b-instruct' },
+      });
+    });
+
+    it('ignores the answer once a cited document has a newer version or is deleted', async () => {
+      const updated = await seedDocument(4);
+      await storeCachedAnswer(updated.id, 3);
+      expect(await service.findCachedAnswer(key, 3600)).toBeNull();
+
+      await truncate(dataSource, ['conversation', 'conversation_message', 'document']);
+      const deleted = await seedDocument(3, new Date());
+      await storeCachedAnswer(deleted.id, 3);
+      expect(await service.findCachedAnswer(key, 3600)).toBeNull();
+    });
+
+    it('ignores answers older than the time to live', async () => {
+      const doc = await seedDocument(3);
+      await storeCachedAnswer(doc.id, 3);
+      await dataSource.query(
+        `UPDATE conversation_message SET created_at = now() - interval '2 hours' WHERE answer_cache_key IS NOT NULL`,
+      );
+      expect(await service.findCachedAnswer(key, 3600)).toBeNull();
+    });
   });
 });

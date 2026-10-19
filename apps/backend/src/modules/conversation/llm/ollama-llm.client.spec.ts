@@ -28,6 +28,7 @@ describe('OllamaLlmClient', () => {
       numCtx: 8192,
       idleTimeoutMs: 50,
       rewriteTimeoutMs: 8000,
+      keepAlive: '30m',
     },
   } as unknown as AppConfigService;
   const messages = [{ role: 'user' as const, content: 'How do I roll back?' }];
@@ -76,6 +77,7 @@ describe('OllamaLlmClient', () => {
       model: 'phi4-mini',
       messages,
       stream: true,
+      keep_alive: '30m',
       options: { temperature: 0.1, num_ctx: 8192 },
     });
   });

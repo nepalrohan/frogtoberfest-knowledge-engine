@@ -49,13 +49,28 @@ export interface AppConfiguration {
     numCtx: number;
     idleTimeoutMs: number;
     rewriteTimeoutMs: number;
+    /* Context window share kept free for the answer itself */
+    answerReserveTokens: number;
+    /* How long Ollama keeps the chat model loaded between questions, e.g. "30m" */
+    keepAlive: string;
   };
   retrieval: {
     minSimilarity: number;
+    /* Share of the question's terms a chunk must contain to pass the gate on keywords alone */
+    minKeywordCoverage: number;
     candidateK: number;
     maxSources: number;
     maxSourcesPerDocument: number;
     contextTokenBudget: number;
+  };
+  reranker: {
+    /* Text Embeddings Inference base URL; empty disables reranking */
+    url: string;
+    timeoutMs: number;
+  };
+  chat: {
+    /* Reuse of an identical standalone question's answer; 0 disables */
+    answerCacheTtlSeconds: number;
   };
 }
 
@@ -109,13 +124,23 @@ export const loadConfiguration = (): AppConfiguration => ({
     numCtx: parseInt(process.env.LLM_NUM_CTX || '8192', 10),
     idleTimeoutMs: parseInt(process.env.LLM_IDLE_TIMEOUT_MS || '30000', 10),
     rewriteTimeoutMs: parseInt(process.env.LLM_REWRITE_TIMEOUT_MS || '8000', 10),
+    answerReserveTokens: parseInt(process.env.LLM_ANSWER_RESERVE_TOKENS || '768', 10),
+    keepAlive: process.env.LLM_KEEP_ALIVE || '30m',
   },
   retrieval: {
     minSimilarity: parseFloat(process.env.RETRIEVAL_MIN_SIMILARITY || '0.65'),
+    minKeywordCoverage: parseFloat(process.env.RETRIEVAL_MIN_KEYWORD_COVERAGE || '0.8'),
     candidateK: parseInt(process.env.RETRIEVAL_CANDIDATE_K || '20', 10),
     maxSources: parseInt(process.env.RETRIEVAL_MAX_SOURCES || '5', 10),
     maxSourcesPerDocument: parseInt(process.env.RETRIEVAL_MAX_SOURCES_PER_DOCUMENT || '2', 10),
     contextTokenBudget: parseInt(process.env.RETRIEVAL_CONTEXT_TOKEN_BUDGET || '2500', 10),
+  },
+  reranker: {
+    url: process.env.RERANKER_URL || '',
+    timeoutMs: parseInt(process.env.RERANKER_TIMEOUT_MS || '10000', 10),
+  },
+  chat: {
+    answerCacheTtlSeconds: parseInt(process.env.CHAT_ANSWER_CACHE_TTL_SECONDS || '3600', 10),
   },
 });
 
@@ -243,6 +268,19 @@ export class AppConfigService {
       this.configService.get<AppConfiguration['retrieval']>('app.retrieval') ??
       loadConfiguration().retrieval
     );
+  }
+
+  /* Optional cross-encoder reranking service */
+  get reranker(): AppConfiguration['reranker'] {
+    return (
+      this.configService.get<AppConfiguration['reranker']>('app.reranker') ??
+      loadConfiguration().reranker
+    );
+  }
+
+  /* Chat turn behaviour */
+  get chat(): AppConfiguration['chat'] {
+    return this.configService.get<AppConfiguration['chat']>('app.chat') ?? loadConfiguration().chat;
   }
 }
 

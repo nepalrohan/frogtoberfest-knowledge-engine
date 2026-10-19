@@ -71,6 +71,7 @@ export class ChatController {
     const turn = await this.conversations.beginTurn(
       conversationId,
       dto.message,
+      dto.retryOfMessageId,
     );
     const stream = SseStream.open(res);
 

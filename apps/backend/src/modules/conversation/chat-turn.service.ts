@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { isValidTraceId } from '@opentelemetry/api';
-import { randomBytes, randomUUID } from 'crypto';
+import { createHash, randomBytes, randomUUID } from 'crypto';
 import { AppConfigService } from '../../config';
 import { AppTracer } from '../../common/telemetry';
 import { StructuredLogger } from '../../common/logger/structured-logger';
@@ -10,13 +10,24 @@ import {
   type IEmbeddingProvider,
 } from '../indexing/embedding/embedding.interface';
 import { VectorStoreService } from '../indexing/retrieval/vector-store.service';
-import { ConversationService, type BegunTurn } from './conversation.service';
+import {
+  ConversationService,
+  type BegunTurn,
+  type CachedAnswer,
+} from './conversation.service';
 import { LLM_CLIENT, type ILlmClient } from './llm/llm-client.interface';
+import { TokenCounter } from '../indexing/chunker/token-counter';
+import type { ChunkCandidate } from '../indexing/retrieval/vector-store.service';
 import { selectContext } from './retrieval/context-selector';
-import { INSUFFICIENT_EVIDENCE_TEXT } from './generation/answer-text';
-import { buildAnswerPrompt } from './generation/prompt-builder';
-import { verifyCitations } from './generation/citation-verifier';
-import { rewriteFollowUp } from './generation/query-rewriter';
+import { explainInsufficientEvidence } from './generation/answer-text';
+import { fitAnswerPrompt } from './generation/prompt-builder';
+import {
+  declaresNoEvidence,
+  verifyCitations,
+} from './generation/citation-verifier';
+import { needsRewrite, rewriteFollowUp } from './generation/query-rewriter';
+import { FirstSentenceGate } from './generation/first-sentence-gate';
+import { RERANKER, type IReranker } from './rerank/reranker.interface';
 import { LlmUnavailableError } from './llm/llm-unavailable.error';
 import type {
   AnswerOutcome,
@@ -44,7 +55,27 @@ interface TurnOutcome {
   model: string;
   promptTokens: number;
   completionTokens: number;
+  /* Diagnostics only some paths produce (cache reuse, trimming, citation support) */
+  runExtras?: Partial<RunDetails>;
+  /* Set on grounded answers to standalone questions so they can be reused */
+  answerCacheKey?: string;
 }
+
+/* Same question (ignoring case, spacing and trailing punctuation) answered by the same models */
+function answerCacheKey(question: string, models: string[]): string {
+  const normalized = question
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .replace(/[\s?.!]+$/, '')
+    .trim();
+  return createHash('sha256')
+    .update([...models, normalized].join('\n'))
+    .digest('hex');
+}
+
+const uniqueTitles = (sources: { documentTitle: string }[]): string[] => [
+  ...new Set(sources.map((s) => s.documentTitle)),
+];
 
 /* Runs one question-to-answer turn: embed, retrieve, select context, generate; reports progress as stream events */
 @Injectable()
@@ -58,6 +89,7 @@ export class ChatTurnService {
     private readonly embeddings: IEmbeddingProvider,
     private readonly vectorStore: VectorStoreService,
     private readonly config: AppConfigService,
+    @Inject(RERANKER) private readonly reranker: IReranker,
   ) {}
 
   /* Runs the turn inside one trace so the meta event, stored run details and logs share its id */
@@ -126,6 +158,7 @@ export class ChatTurnService {
         completionTokens: result.completionTokens,
         totalLatencyMs: Date.now() - startedAt,
         stages,
+        ...result.runExtras,
       };
       /* The answer is only reported done once it is durably stored */
       await this.conversations.saveAnswer({
@@ -137,6 +170,7 @@ export class ChatTurnService {
         refusalReason: result.refusalReason,
         sources: result.sources,
         run,
+        answerCacheKey: result.answerCacheKey,
       });
       sink.emit({
         type: 'done',
@@ -167,13 +201,33 @@ export class ChatTurnService {
     });
 
     try {
-      /* Follow-ups are rewritten for retrieval only; the answer prompt keeps the user's own words */
-      if (turn.history.length > 0) {
+      const { llm, chat } = this.config;
+      const cacheKey =
+        turn.history.length === 0 && chat.answerCacheTtlSeconds > 0
+          ? answerCacheKey(question, [
+              llm.chatModel,
+              embeddingModel,
+              this.reranker.enabled ? 'reranked' : 'fused',
+            ])
+          : undefined;
+      const cached =
+        cacheKey &&
+        (await this.conversations.findCachedAnswer(
+          cacheKey,
+          chat.answerCacheTtlSeconds,
+        ));
+      if (cached) {
+        await this.replayCached(cached, sink, finish, traceId);
+        return;
+      }
+
+      /* Follow-ups are rewritten for retrieval only, and only when they lean on earlier turns */
+      if (turn.history.length > 0 && needsRewrite(question)) {
         rewrittenQuery = await timed('rewrite', () =>
           rewriteFollowUp(this.llm, {
             question,
             history: turn.history,
-            timeoutMs: this.config.llm.rewriteTimeoutMs,
+            timeoutMs: llm.rewriteTimeoutMs,
             signal: sink.signal,
           }),
         );
@@ -184,7 +238,7 @@ export class ChatTurnService {
         this.embeddings.embed([searchQuery], 'query'),
       );
       sink.signal.throwIfAborted();
-      const candidates = await timed('retrieve', () =>
+      let candidates = await timed('retrieve', () =>
         this.vectorStore.searchHybrid(
           searchQuery,
           queryVector ?? [],
@@ -196,6 +250,14 @@ export class ChatTurnService {
         ),
       );
       candidatesRetrieved = candidates.length;
+      let reranked = false;
+      if (this.reranker.enabled && candidates.length > 1) {
+        const ordered = await timed('rerank', () =>
+          this.rerank(searchQuery, candidates, sink.signal, traceId),
+        );
+        reranked = ordered !== candidates;
+        candidates = ordered;
+      }
       const selection = await timed('select', async () =>
         selectContext(candidates, retrieval),
       );
@@ -207,7 +269,7 @@ export class ChatTurnService {
           bestSimilarity: selection.bestSimilarity,
         });
         await finish({
-          content: INSUFFICIENT_EVIDENCE_TEXT,
+          content: explainInsufficientEvidence(selection.closestDocuments),
           outcome: 'refused',
           refusalReason: 'insufficient_evidence',
           sources: [],
@@ -215,41 +277,84 @@ export class ChatTurnService {
           model: '',
           promptTokens: 0,
           completionTokens: 0,
+          runExtras: reranked ? { reranked } : undefined,
         });
         return;
       }
-      contextTokens = selection.contextTokens;
-      this.logger.logEvent(LogEvents.RETRIEVAL_COMPLETED, {
-        traceId,
-        candidates: candidates.length,
-        selectedChunkIds: selection.sources.map((s) => s.chunkId),
-        bestSimilarity: selection.bestSimilarity,
-      });
-      sink.emit({ type: 'sources', sources: selection.sources });
 
-      const prompt = buildAnswerPrompt({
+      /* Ollama cuts an overlong prompt from the start, losing the rules; trim history and sources instead */
+      const fitted = fitAnswerPrompt({
         question,
         history: turn.history,
         sources: selection.sources,
+        maxPromptTokens: llm.numCtx - llm.answerReserveTokens,
       });
-      const generated = await timed('generate', () =>
-        this.llm.streamChat(prompt, {
+      if (fitted.historyDropped > 0 || fitted.sourcesDropped > 0) {
+        this.logger.warnEvent(LogEvents.CHAT_PROMPT_TRIMMED, {
+          traceId,
+          historyDropped: fitted.historyDropped,
+          sourcesDropped: fitted.sourcesDropped,
+          promptTokens: fitted.promptTokens,
+        });
+      }
+      const sources = fitted.sources;
+      contextTokens = sources.reduce(
+        (total, s) => total + TokenCounter.countTokens(s.snippet),
+        0,
+      );
+      this.logger.logEvent(LogEvents.RETRIEVAL_COMPLETED, {
+        traceId,
+        candidates: candidates.length,
+        selectedChunkIds: sources.map((s) => s.chunkId),
+        bestSimilarity: selection.bestSimilarity,
+        reranked,
+      });
+      sink.emit({ type: 'sources', sources });
+
+      const gate = new FirstSentenceGate(
+        (delta) => sink.emit({ type: 'token', delta }),
+        declaresNoEvidence,
+      );
+      const generated = await timed('generate', async () => {
+        const result = await this.llm.streamChat(fitted.messages, {
           signal: sink.signal,
           onToken: (delta) => {
             partial += delta;
-            sink.emit({ type: 'token', delta });
+            gate.push(delta);
           },
-        }),
-      );
+        });
+        gate.end();
+        return result;
+      });
       const verified = await timed('verify', async () =>
-        verifyCitations(generated.text, selection.sources),
+        verifyCitations(generated.text, sources),
       );
+      const refusedForEvidence =
+        verified.outcome === 'refused' &&
+        verified.refusalReason === 'insufficient_evidence';
       await finish({
         ...verified,
-        streamContent: false,
+        content: refusedForEvidence
+          ? explainInsufficientEvidence(uniqueTitles(sources))
+          : verified.content,
+        /* A refusal held back by the gate has not been shown yet */
+        streamContent: gate.suppressed,
         model: generated.model,
         promptTokens: generated.promptTokens,
         completionTokens: generated.completionTokens,
+        runExtras: {
+          ...(reranked ? { reranked } : {}),
+          ...(fitted.historyDropped
+            ? { historyDropped: fitted.historyDropped }
+            : {}),
+          ...(fitted.sourcesDropped
+            ? { sourcesDropped: fitted.sourcesDropped }
+            : {}),
+          ...(verified.unsupportedCitations
+            ? { unsupportedCitations: verified.unsupportedCitations }
+            : {}),
+        },
+        answerCacheKey: verified.outcome === 'answered' ? cacheKey : undefined,
       });
     } catch (err) {
       if (!sink.signal.aborted) {
@@ -281,5 +386,59 @@ export class ChatTurnService {
         sources: [],
       });
     }
+  }
+
+  /* Orders candidates by cross-encoder score; any reranker failure keeps the fused order */
+  private async rerank(
+    query: string,
+    candidates: ChunkCandidate[],
+    signal: AbortSignal,
+    traceId: string,
+  ): Promise<ChunkCandidate[]> {
+    try {
+      const scores = await this.reranker.rerank(
+        query,
+        candidates.map((c) => c.content),
+        { signal },
+      );
+      return candidates
+        .map((candidate, i) => ({
+          candidate,
+          score: scores[i] ?? Number.NEGATIVE_INFINITY,
+        }))
+        .sort((a, b) => b.score - a.score)
+        .map(({ candidate }) => candidate);
+    } catch (err) {
+      if (signal.aborted) throw err;
+      this.logger.logError(LogEvents.RETRIEVAL_RERANK_FAILED, err, { traceId });
+      return candidates;
+    }
+  }
+
+  /* Answers from an identical earlier question whose cited documents have not changed */
+  private async replayCached(
+    cached: CachedAnswer,
+    sink: TurnSink,
+    finish: (result: TurnOutcome) => Promise<void>,
+    traceId: string,
+  ): Promise<void> {
+    this.logger.logEvent(LogEvents.CHAT_ANSWER_CACHE_HIT, {
+      traceId,
+      cachedFromMessageId: cached.messageId,
+    });
+    sink.emit({ type: 'sources', sources: cached.sources });
+    await finish({
+      content: cached.content,
+      outcome: 'answered',
+      sources: cached.sources,
+      streamContent: true,
+      model: cached.run.model,
+      promptTokens: 0,
+      completionTokens: 0,
+      runExtras: {
+        cachedFromMessageId: cached.messageId,
+        contextTokens: cached.run.contextTokens,
+      },
+    });
   }
 }

@@ -21,6 +21,9 @@ export type MessageStatus = 'completed' | 'stopped';
 /* One user question or assistant answer, with the evidence and diagnostics behind each answer */
 @Entity('conversation_message')
 @Index(['conversationId', 'createdAt'])
+@Index('IDX_conversation_message_answer_cache', ['answerCacheKey', 'createdAt'], {
+  where: '"answer_cache_key" IS NOT NULL',
+})
 export class ConversationMessage {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -54,6 +57,15 @@ export class ConversationMessage {
 
   @Column({ name: 'run', type: 'jsonb', nullable: true })
   run?: RunDetails | null;
+
+  /* Hash of a standalone question and the models that answered it; set only on reusable answers */
+  @Column({
+    name: 'answer_cache_key',
+    type: 'varchar',
+    length: 64,
+    nullable: true,
+  })
+  answerCacheKey?: string | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;

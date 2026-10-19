@@ -151,7 +151,7 @@ export class OllamaLlmClient implements ILlmClient {
     stream: boolean,
     signal: AbortSignal,
   ): RequestInit {
-    const { chatModel, temperature, numCtx } = this.config.llm;
+    const { chatModel, temperature, numCtx, keepAlive } = this.config.llm;
     return {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -159,6 +159,8 @@ export class OllamaLlmClient implements ILlmClient {
         model: chatModel,
         messages,
         stream,
+        /* Keeps the model in memory between questions; reloading it dominates latency on small machines */
+        keep_alive: keepAlive,
         options: { temperature, num_ctx: numCtx },
       }),
       signal,

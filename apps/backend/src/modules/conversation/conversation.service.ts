@@ -1,5 +1,11 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { DataSource } from 'typeorm';
+import {
+  DataSource,
+  LessThan,
+  MoreThan,
+  Not,
+  type EntityManager,
+} from 'typeorm';
 import {
   Conversation,
   ConversationMessage,
@@ -34,6 +40,15 @@ export interface AssistantAnswer {
   refusalReason?: RefusalReason;
   sources: ChatSource[];
   run?: RunDetails;
+  answerCacheKey?: string;
+}
+
+/* A stored answer that may be reused for an identical standalone question */
+export interface CachedAnswer {
+  messageId: string;
+  content: string;
+  sources: ChatSource[];
+  run: RunDetails;
 }
 
 export interface BegunTurn {
@@ -48,10 +63,14 @@ export interface BegunTurn {
 export class ConversationService {
   constructor(private readonly dataSource: DataSource) {}
 
-  /* Stores the question before any answering work, creating the conversation on the first question */
+  /*
+   * Stores the question before any answering work, creating the conversation on the first question.
+   * A retry of the conversation's latest, unanswered question reuses it (dropping any stopped answer to it).
+   */
   async beginTurn(
     conversationId: string | null,
     question: string,
+    retryOfMessageId?: string,
   ): Promise<BegunTurn> {
     return this.dataSource.transaction(async (manager) => {
       const conversations = manager.getRepository(Conversation);
@@ -66,16 +85,26 @@ export class ConversationService {
         throw new NotFoundException(`Conversation ${conversationId} not found`);
       }
 
-      const recent = await manager.getRepository(ConversationMessage).find({
-        select: { role: true, content: true },
-        where: { conversationId: conversation.id, status: 'completed' },
-        order: { createdAt: 'DESC' },
-        take: HISTORY_WINDOW,
-      });
-      const history = recent
-        .reverse()
-        .map(({ role, content }) => ({ role, content }));
+      const retried =
+        conversationId && retryOfMessageId
+          ? await this.unansweredQuestion(manager, conversation.id, retryOfMessageId)
+          : null;
+      if (retried) {
+        await manager.getRepository(ConversationMessage).delete({
+          conversationId: conversation.id,
+          role: 'assistant',
+          status: 'stopped',
+          createdAt: MoreThan(retried.createdAt),
+        });
+        await conversations.update(conversation.id, { updatedAt: new Date() });
+        return {
+          conversation,
+          userMessage: retried,
+          history: await this.historyBefore(manager, conversation.id, retried.createdAt),
+        };
+      }
 
+      const history = await this.historyBefore(manager, conversation.id);
       const userMessage = await manager
         .getRepository(ConversationMessage)
         .save({
@@ -89,6 +118,89 @@ export class ConversationService {
       }
       return { conversation, userMessage, history };
     });
+  }
+
+  /* Last completed messages (optionally before a point in time), oldest first */
+  private async historyBefore(
+    manager: EntityManager,
+    conversationId: string,
+    before?: Date,
+  ): Promise<HistoryMessage[]> {
+    const recent = await manager.getRepository(ConversationMessage).find({
+      select: { role: true, content: true },
+      where: {
+        conversationId,
+        status: 'completed',
+        ...(before ? { createdAt: LessThan(before) } : {}),
+      },
+      order: { createdAt: 'DESC' },
+      take: HISTORY_WINDOW,
+    });
+    return recent.reverse().map(({ role, content }) => ({ role, content }));
+  }
+
+  /* The given question if it is the conversation's last message, or followed only by stopped answers */
+  private async unansweredQuestion(
+    manager: EntityManager,
+    conversationId: string,
+    messageId: string,
+  ): Promise<ConversationMessage | null> {
+    const messages = manager.getRepository(ConversationMessage);
+    const question = await messages.findOneBy({
+      id: messageId,
+      conversationId,
+      role: 'user',
+    });
+    if (!question) return null;
+    const later = await messages.find({
+      select: { role: true, status: true },
+      /* Dates lose Postgres' microseconds, so the question itself also compares as later */
+      where: {
+        conversationId,
+        id: Not(question.id),
+        createdAt: MoreThan(question.createdAt),
+      },
+    });
+    const unanswered = later.every(
+      (m) => m.role === 'assistant' && m.status === 'stopped',
+    );
+    return unanswered ? question : null;
+  }
+
+  /*
+   * Latest reusable answer for this key, if younger than maxAgeSeconds and every document it cites
+   * is still live, indexed and at the cited version.
+   */
+  async findCachedAnswer(
+    answerCacheKey: string,
+    maxAgeSeconds: number,
+  ): Promise<CachedAnswer | null> {
+    const message = await this.dataSource
+      .getRepository(ConversationMessage)
+      .findOne({
+        where: {
+          answerCacheKey,
+          createdAt: MoreThan(new Date(Date.now() - maxAgeSeconds * 1000)),
+        },
+        order: { createdAt: 'DESC' },
+      });
+    if (!message?.run) return null;
+
+    const cited = message.sources.filter((s) => s.cited);
+    const rows: { current: string }[] = await this.dataSource.query(
+      `SELECT count(*) AS current
+       FROM unnest($1::uuid[], $2::int[]) AS cited(document_id, version)
+       JOIN document d ON d.id = cited.document_id AND d.version = cited.version
+       WHERE d.deleted_at IS NULL AND d.sync_status = 'indexed'`,
+      [cited.map((s) => s.documentId), cited.map((s) => s.documentVersion)],
+    );
+    if (Number(rows[0]?.current ?? 0) !== cited.length) return null;
+    return {
+      messageId: message.id,
+      content: message.content,
+      sources: message.sources,
+      run: message.run,
+    };
   }
 
   /* Stores a finished or stopped answer and marks the conversation as recently active */

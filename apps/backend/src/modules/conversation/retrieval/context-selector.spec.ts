@@ -3,6 +3,7 @@ import { selectContext, type ContextLimits } from './context-selector';
 
 const limits: ContextLimits = {
   minSimilarity: 0.65,
+  minKeywordCoverage: 0.8,
   maxSources: 5,
   maxSourcesPerDocument: 2,
   contextTokenBudget: 2500,
@@ -14,6 +15,7 @@ const candidate = (
   doc: string,
   cosine: number,
   content = `content of ${id}`,
+  keywordCoverage = 0,
 ): ChunkCandidate => ({
   chunkId: id,
   documentId: `doc-${doc}`,
@@ -25,6 +27,7 @@ const candidate = (
   cosineSimilarity: cosine,
   vectorRank: 1,
   keywordRank: null,
+  keywordCoverage,
   rrfScore: 0.01,
 });
 
@@ -37,13 +40,44 @@ describe('selectContext', () => {
     expect(result).toEqual({
       kind: 'insufficient_evidence',
       bestSimilarity: 0.42,
+      closestDocuments: ['Doc A', 'Doc B'],
     });
+  });
+
+  it('names at most three distinct closest documents, most similar first', () => {
+    const result = selectContext(
+      [
+        candidate('a', 'A', 0.2),
+        candidate('b', 'B', 0.5),
+        candidate('b2', 'B', 0.45),
+        candidate('c', 'C', 0.4),
+        candidate('d', 'D', 0.3),
+      ],
+      limits,
+    );
+    expect(result).toMatchObject({ closestDocuments: ['Doc B', 'Doc C', 'Doc D'] });
+  });
+
+  it('accepts a chunk containing most of the question terms even when similarity is low', () => {
+    const result = selectContext(
+      [candidate('a', 'A', 0.5), candidate('err', 'Errors', 0.1, 'ERR_4521 means a lock timeout', 0.8)],
+      limits,
+    );
+    expect(result.kind).toBe('selected');
+    if (result.kind !== 'selected') return;
+    expect(result.sources.map((s) => s.chunkId)).toEqual(['a', 'err']);
+  });
+
+  it('does not accept partial keyword overlap below the coverage threshold', () => {
+    const result = selectContext([candidate('a', 'A', 0.5, 'some text', 0.5)], limits);
+    expect(result.kind).toBe('insufficient_evidence');
   });
 
   it('reports insufficient evidence when there are no candidates', () => {
     expect(selectContext([], limits)).toEqual({
       kind: 'insufficient_evidence',
       bestSimilarity: 0,
+      closestDocuments: [],
     });
   });
 

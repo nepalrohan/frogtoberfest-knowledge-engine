@@ -35,7 +35,7 @@ interface ChatContextValue {
   conversationsStatus: "loading" | "ready" | "error";
   threads: Record<string, Thread>;
   loadThread: (id: string) => Promise<void>;
-  send: (conversationId: string | null, text: string) => Promise<void>;
+  send: (conversationId: string | null, text: string, retryOfMessageId?: string) => Promise<void>;
   stop: (key: string) => void;
   retry: (key: string, assistantMessageId: string) => void;
   remove: (id: string) => Promise<void>;
@@ -86,7 +86,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const send = useCallback(
-    async (conversationId: string | null, text: string) => {
+    async (conversationId: string | null, text: string, retryOfMessageId?: string) => {
       let key = conversationId ?? NEW_THREAD_KEY;
       const now = new Date().toISOString();
       let userId = `local-user-${Date.now()}`;
@@ -191,7 +191,11 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       controllers.current.set(key, controller);
 
       try {
-        await chatApi.sendMessage(conversationId, { message: text }, { signal: controller.signal, onEvent: handleEvent });
+        await chatApi.sendMessage(
+          conversationId,
+          { message: text, ...(retryOfMessageId ? { retryOfMessageId } : {}) },
+          { signal: controller.signal, onEvent: handleEvent },
+        );
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") {
           updateAssistant((m) => ({ ...m, status: "stopped" }));
@@ -218,7 +222,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     controllers.current.get(key)?.abort();
   }, []);
 
-  /* Drops the failed or stopped turn and asks the same question again. */
+  /* Drops the failed or stopped turn and asks the same question again; the server reuses the stored question. */
   const retry = useCallback(
     (key: string, assistantMessageId: string) => {
       const thread = threads[key];
@@ -235,7 +239,9 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
           [key]: { ...current, messages: current.messages.filter((m) => m.id !== assistantMessageId && m.id !== question.id) },
         };
       });
-      void send(key === NEW_THREAD_KEY ? null : key, question.content);
+      /* Ids still prefixed "local-" never reached the server, so there is nothing to reuse */
+      const storedQuestionId = question.id.startsWith("local-") ? undefined : question.id;
+      void send(key === NEW_THREAD_KEY ? null : key, question.content, storedQuestionId);
     },
     [threads, send],
   );

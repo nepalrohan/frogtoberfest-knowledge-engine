@@ -34,7 +34,7 @@ Standard fixed-character chunkers destroy table structures and orphan code block
 
 ## 🔍 Hybrid Retrieval Architecture
 
-> **As implemented** (`apps/backend/src/modules/indexing/retrieval/vector-store.service.ts`): only chunks whose document is not deleted, is `indexed`, matches the chunk's `document_version`, and whose `embedding_model` equals the active model are searched. The keyword side ORs the question's stemmed lexemes against the stored `search_vector` (an AND query rarely matches natural questions). The relevance gate (`RETRIEVAL_MIN_SIMILARITY`, default 0.65) and context selection (≤ 5 sources, ≤ 2 per document, token budget) run after fusion. The SQL below is the original sketch.
+> **As implemented** (`apps/backend/src/modules/indexing/retrieval/vector-store.service.ts`): only chunks whose document is not deleted, is `indexed`, matches the chunk's `document_version`, and whose `embedding_model` equals the active model are searched. The keyword side ORs the question's stemmed lexemes against the stored `search_vector` (an AND query rarely matches natural questions). The relevance gate passes when the best cosine similarity reaches `RETRIEVAL_MIN_SIMILARITY` (default 0.65) **or** a chunk contains at least `RETRIEVAL_MIN_KEYWORD_COVERAGE` (default 0.8) of the question's stemmed terms, so exact identifiers such as `ERR_4521` are not refused for a weak vector match. When `RERANKER_URL` points at a Text Embeddings Inference cross-encoder, the fused candidates are reordered by it before selection (a reranker failure keeps the fused order). Context selection (≤ 5 sources, ≤ 2 per document, token budget) runs last. The SQL below is the original sketch.
 
 To achieve high recall across conceptual questions and keyword lookups, KE implements **Hybrid Search**:
 
@@ -152,6 +152,9 @@ export async function searchHybrid(
 Local 7B models have finite effective context (4k - 8k tokens). To maintain quality:
 - Fetch only the **last 6 messages** (3 user-assistant turns) for the active `conversation_id`.
 - Do **not** rely on LLM memory to recall knowledge. Every user turn executes a fresh retrieval query against the PostgreSQL vector store.
+- **As implemented**: the whole prompt is measured against `LLM_NUM_CTX − LLM_ANSWER_RESERVE_TOKENS` before generation. Ollama silently drops the *start* of an overlong prompt (the grounding rules), so the backend trims instead: oldest history first, then the lowest-ranked sources, then the tail of the last source. Trimming is logged (`chat.prompt.trimmed`) and shown in the run details.
+- Follow-ups are rewritten into a standalone search query only when they lean on earlier turns (short, or containing words such as "it", "that", "what about").
+- A first question identical to an earlier one (ignoring case and punctuation, same models) reuses the stored answer for `CHAT_ANSWER_CACHE_TTL_SECONDS` while every cited document is still at the cited version.
 
 ```typescript
 import { DataSource } from 'typeorm';
@@ -246,3 +249,8 @@ flowchart TD
 1. **Empty Search Result**: No chunks returned above similarity threshold `0.65`.
 2. **Explicit LLM Refusal**: LLM completion contains phrase matching *"insufficient information"* or *"not mentioned in the context"*.
 3. **Database Write Precondition**: The response is **never** sent to the client unless the database commit to `conversation_message` succeeds.
+
+### As implemented: claim support and early refusal
+- **Claim support**: each `[Source N]` must sit in a sentence (or list item) that shares at least one content word (prefix-matched) with source N's title, headings or text. Citations with no overlap are removed and counted in `run.unsupportedCitations`; if none remain, the answer is refused as `unverifiable_citations`. This is a cheap lexical check, not proof of entailment.
+- **First-sentence gate**: streamed tokens are held until the first sentence ends; a first sentence declaring insufficient evidence is never shown as a half-answer.
+- **Refusal explanation**: an insufficient-evidence refusal names the closest documents checked, so the user can rephrase or ingest the missing topic.

@@ -10,7 +10,12 @@ import type {
 import type { AppConfigService } from '../../config';
 import type { ChatStreamEvent } from './chat.types';
 import { LlmUnavailableError } from './llm/llm-unavailable.error';
-import { UNVERIFIABLE_CITATIONS_TEXT } from './generation/answer-text';
+import {
+  INSUFFICIENT_EVIDENCE_TEXT,
+  UNVERIFIABLE_CITATIONS_TEXT,
+} from './generation/answer-text';
+import type { IReranker } from './rerank/reranker.interface';
+import type { CachedAnswer } from './conversation.service';
 
 const QUERY_VECTOR = [0.1, 0.2, 0.3];
 
@@ -20,11 +25,12 @@ const candidate = (id: string, cosine: number): ChunkCandidate => ({
   documentVersion: 1,
   documentTitle: `Doc ${id}`,
   sourceType: 'text',
-  content: `content ${id}`,
+  content: `Redeploy the previous release tag to roll back (${id}).`,
   sectionHeaders: [`Doc ${id}`],
   cosineSimilarity: cosine,
   vectorRank: 1,
   keywordRank: null,
+  keywordCoverage: 0,
   rrfScore: 0.03,
 });
 
@@ -44,22 +50,18 @@ describe('ChatTurnService', () => {
   } as unknown as BegunTurn;
 
   let events: ChatStreamEvent[];
-  let conversations: { saveAnswer: jest.Mock };
+  let conversations: { saveAnswer: jest.Mock; findCachedAnswer: jest.Mock };
+  let reranker: { enabled: boolean; rerank: jest.Mock };
   let embeddings: { embed: jest.Mock; getModelName: jest.Mock };
   let vectorStore: { searchHybrid: jest.Mock };
   let llm: { streamChat: jest.Mock; complete: jest.Mock };
   let service: ChatTurnService;
 
-  const config = {
-    retrieval: {
-      minSimilarity: 0.65,
-      candidateK: 20,
-      maxSources: 5,
-      maxSourcesPerDocument: 2,
-      contextTokenBudget: 2500,
-    },
-    llm: { rewriteTimeoutMs: 8000 },
-  } as unknown as AppConfigService;
+  let config: {
+    retrieval: Record<string, number>;
+    llm: Record<string, number | string>;
+    chat: { answerCacheTtlSeconds: number };
+  };
 
   const run = (
     signal = new AbortController().signal,
@@ -68,7 +70,28 @@ describe('ChatTurnService', () => {
 
   beforeEach(() => {
     events = [];
-    conversations = { saveAnswer: jest.fn() };
+    config = {
+      retrieval: {
+        minSimilarity: 0.65,
+        minKeywordCoverage: 0.8,
+        candidateK: 20,
+        maxSources: 5,
+        maxSourcesPerDocument: 2,
+        contextTokenBudget: 2500,
+      },
+      llm: {
+        chatModel: 'qwen',
+        rewriteTimeoutMs: 8000,
+        numCtx: 8192,
+        answerReserveTokens: 768,
+      },
+      chat: { answerCacheTtlSeconds: 0 },
+    };
+    conversations = {
+      saveAnswer: jest.fn(),
+      findCachedAnswer: jest.fn(async () => null),
+    };
+    reranker = { enabled: false, rerank: jest.fn() };
     embeddings = {
       embed: jest.fn(async () => [QUERY_VECTOR]),
       getModelName: jest.fn(() => 'nomic-embed-text'),
@@ -101,7 +124,8 @@ describe('ChatTurnService', () => {
       llm as unknown as ILlmClient,
       embeddings as unknown as IEmbeddingProvider,
       vectorStore as unknown as VectorStoreService,
-      config,
+      config as unknown as AppConfigService,
+      reranker as unknown as IReranker,
     );
   });
 
@@ -165,9 +189,8 @@ describe('ChatTurnService', () => {
       .filter((e) => e.type === 'token')
       .map((e) => (e.type === 'token' ? e.delta : ''))
       .join('');
-    expect(text).toBe(
-      'I do not have sufficient information in the indexed documentation to answer this question.',
-    );
+    expect(text.startsWith(INSUFFICIENT_EVIDENCE_TEXT)).toBe(true);
+    expect(text).toContain('Closest documents checked: **Doc a**');
     expect(events.at(-1)).toMatchObject({
       type: 'done',
       outcome: 'refused',
@@ -404,6 +427,133 @@ describe('ChatTurnService', () => {
       expect(
         entries.find((e) => e.event === 'chat.request.failed'),
       ).toMatchObject({ code: 'LLM_UNAVAILABLE' });
+    });
+  });
+
+  const streamedText = () =>
+    events.map((e) => (e.type === 'token' ? e.delta : '')).join('');
+
+  it('skips rewriting a follow-up that already stands on its own', async () => {
+    await run(undefined, {
+      ...followUp,
+      userMessage: { id: 'user-3', content: 'How do I rotate the database credentials?' },
+    } as unknown as BegunTurn);
+
+    expect(llm.complete).not.toHaveBeenCalled();
+    expect(embeddings.embed).toHaveBeenCalledWith(
+      ['How do I rotate the database credentials?'],
+      'query',
+    );
+  });
+
+  it('never streams a model refusal as an answer and explains which documents were checked', async () => {
+    llm.streamChat.mockImplementation(async (_m, { onToken }) => {
+      onToken(`${INSUFFICIENT_EVIDENCE_TEXT} `);
+      onToken('Maybe ask ops.');
+      return { text: `${INSUFFICIENT_EVIDENCE_TEXT} Maybe ask ops.`, model: 'qwen', promptTokens: 1, completionTokens: 1 };
+    });
+
+    await run();
+
+    expect(streamedText()).not.toContain('Maybe ask ops');
+    expect(streamedText()).toContain('Closest documents checked: **Doc a**, **Doc b**');
+    expect(events.at(-1)).toMatchObject({ type: 'done', outcome: 'refused', refusalReason: 'insufficient_evidence' });
+  });
+
+  it('trims history to fit the context window and records it in the run', async () => {
+    config.llm.numCtx = 1;
+    config.llm.answerReserveTokens = 0;
+
+    await run(undefined, followUp);
+
+    const [messages] = llm.streamChat.mock.calls[0];
+    expect(messages.map((m: { role: string }) => m.role)).toEqual(['system', 'user']);
+    expect(events.at(-1)).toMatchObject({
+      type: 'done',
+      run: { historyDropped: 2, sourcesDropped: 1 },
+    });
+  });
+
+  describe('reranking', () => {
+    beforeEach(() => {
+      reranker.enabled = true;
+    });
+
+    it('orders candidates by reranker score before selecting sources', async () => {
+      reranker.rerank.mockResolvedValue([0.1, 0.9]);
+
+      await run();
+
+      expect(reranker.rerank).toHaveBeenCalledWith(
+        'How do I roll back?',
+        [expect.stringContaining('(a)'), expect.stringContaining('(b)')],
+        { signal: expect.any(AbortSignal) },
+      );
+      const sources = events.find((e) => e.type === 'sources');
+      expect(sources?.type === 'sources' && sources.sources.map((s) => s.chunkId)).toEqual(['b', 'a']);
+      expect(events.some((e) => e.type === 'stage' && e.stage === 'rerank')).toBe(true);
+      expect(events.at(-1)).toMatchObject({ type: 'done', run: { reranked: true } });
+    });
+
+    it('keeps the fused order when the reranker fails', async () => {
+      reranker.rerank.mockRejectedValue(new Error('connection refused'));
+
+      await run();
+
+      const sources = events.find((e) => e.type === 'sources');
+      expect(sources?.type === 'sources' && sources.sources.map((s) => s.chunkId)).toEqual(['a', 'b']);
+      expect(events.at(-1)).toMatchObject({ type: 'done', outcome: 'answered' });
+    });
+  });
+
+  describe('answer cache', () => {
+    beforeEach(() => {
+      config.chat.answerCacheTtlSeconds = 3600;
+    });
+
+    it('stores a grounded first answer under a key shared by the same question phrased loosely', async () => {
+      await run();
+      const key = conversations.saveAnswer.mock.calls[0][0].answerCacheKey;
+      expect(key).toMatch(/^[0-9a-f]{64}$/);
+
+      conversations.saveAnswer.mockClear();
+      await run(undefined, {
+        ...firstTurn,
+        userMessage: { id: 'user-9', content: '  how do I ROLL back ' },
+      } as unknown as BegunTurn);
+      expect(conversations.findCachedAnswer).toHaveBeenLastCalledWith(key, 3600);
+    });
+
+    it('does not cache follow-ups or refusals', async () => {
+      await run(undefined, followUp);
+      expect(conversations.findCachedAnswer).not.toHaveBeenCalled();
+      expect(conversations.saveAnswer.mock.calls[0][0].answerCacheKey).toBeUndefined();
+
+      vectorStore.searchHybrid.mockResolvedValue([candidate('a', 0.42)]);
+      await run();
+      expect(conversations.saveAnswer.mock.calls[1][0].answerCacheKey).toBeUndefined();
+    });
+
+    it('replays a cached answer without retrieval or generation', async () => {
+      const cached: CachedAnswer = {
+        messageId: 'cached-1',
+        content: 'Redeploy the tag [Source 1].',
+        sources: [],
+        run: { model: 'qwen', contextTokens: 120 } as CachedAnswer['run'],
+      };
+      conversations.findCachedAnswer.mockResolvedValue(cached);
+
+      await run();
+
+      expect(embeddings.embed).not.toHaveBeenCalled();
+      expect(llm.streamChat).not.toHaveBeenCalled();
+      expect(streamedText()).toBe('Redeploy the tag [Source 1].');
+      expect(events.at(-1)).toMatchObject({
+        type: 'done',
+        outcome: 'answered',
+        run: { cachedFromMessageId: 'cached-1', contextTokens: 120 },
+      });
+      expect(conversations.saveAnswer.mock.calls[0][0].answerCacheKey).toBeUndefined();
     });
   });
 });

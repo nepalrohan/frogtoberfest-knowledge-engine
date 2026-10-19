@@ -1,4 +1,8 @@
-import { buildAnswerPrompt } from './prompt-builder';
+import {
+  buildAnswerPrompt,
+  countPromptTokens,
+  fitAnswerPrompt,
+} from './prompt-builder';
 import type { ChatSource } from '../chat.types';
 
 const source = (
@@ -86,5 +90,45 @@ describe('buildAnswerPrompt', () => {
       ['assistant', 'Redeploy the previou'],
       ['user', expect.stringContaining('<source_document')],
     ]);
+  });
+});
+
+describe('fitAnswerPrompt', () => {
+  const words = (n: number) => Array.from({ length: n }, (_, i) => `word${i}`).join(' ');
+  const history = [
+    { role: 'user' as const, content: words(200) },
+    { role: 'assistant' as const, content: words(200) },
+  ];
+  const sources = [source(1, words(150)), source(2, words(150)), source(3, words(150))];
+  const full = countPromptTokens(
+    buildAnswerPrompt({ question: 'q?', history, sources }),
+  );
+
+  it('changes nothing when the prompt already fits', () => {
+    const fitted = fitAnswerPrompt({ question: 'q?', history, sources, maxPromptTokens: full });
+    expect(fitted).toMatchObject({ historyDropped: 0, sourcesDropped: 0, sources, promptTokens: full });
+  });
+
+  it('drops the oldest history before any source', () => {
+    const fitted = fitAnswerPrompt({ question: 'q?', history, sources, maxPromptTokens: full - 10 });
+    expect(fitted.historyDropped).toBe(1);
+    expect(fitted.sourcesDropped).toBe(0);
+    expect(fitted.messages[1]).toEqual(history[1]);
+  });
+
+  it('then drops the lowest-ranked sources, keeping the numbering of the rest', () => {
+    const withoutHistory = countPromptTokens(buildAnswerPrompt({ question: 'q?', history: [], sources }));
+    const fitted = fitAnswerPrompt({ question: 'q?', history, sources, maxPromptTokens: withoutHistory - 10 });
+    expect(fitted.historyDropped).toBe(2);
+    expect(fitted.sources.map((s) => s.index)).toEqual([1, 2]);
+    expect(fitted.promptTokens).toBeLessThanOrEqual(withoutHistory - 10);
+  });
+
+  it('trims the last source rather than sending a prompt over the limit, keeping the rules', () => {
+    const fitted = fitAnswerPrompt({ question: 'q?', history, sources, maxPromptTokens: 400 });
+    expect(fitted.sources).toHaveLength(1);
+    expect(fitted.sources[0]!.snippet.length).toBeLessThan(sources[0]!.snippet.length);
+    expect(fitted.promptTokens).toBeLessThanOrEqual(400);
+    expect(fitted.messages[0]!.role).toBe('system');
   });
 });

@@ -89,10 +89,12 @@ describeWithDatabase('VectorStoreService.searchHybrid (real pgvector)', () => {
       cosineSimilarity: expect.closeTo(1, 5),
       vectorRank: 1,
       keywordRank: 1,
+      keywordCoverage: 1,
       rrfScore: expect.closeTo(2 / 61, 6),
     });
     expect(results[1]?.cosineSimilarity).toBeCloseTo(Math.SQRT1_2, 5);
     expect(results[1]?.keywordRank).toBeNull();
+    expect(results[1]?.keywordCoverage).toBe(0);
   });
 
   it('finds a chunk by an exact identifier even when its vector is unrelated', async () => {
@@ -102,7 +104,12 @@ describeWithDatabase('VectorStoreService.searchHybrid (real pgvector)', () => {
     const results = await store.searchHybrid('what is ERR_4521', axis(0), 'nomic-embed-text', { candidateK: 1 });
 
     const hit = results.find((r) => r.content.startsWith('ERR_4521'));
-    expect(hit).toMatchObject({ keywordRank: 1, vectorRank: null, cosineSimilarity: expect.closeTo(0, 5) });
+    expect(hit).toMatchObject({
+      keywordRank: 1,
+      vectorRank: null,
+      keywordCoverage: 1,
+      cosineSimilarity: expect.closeTo(0, 5),
+    });
   });
 
   it('excludes deleted, unindexed, outdated and other-model chunks', async () => {

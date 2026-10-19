@@ -45,7 +45,17 @@ export interface RunDetails {
   completionTokens: number;
   totalLatencyMs: number;
   stages: StageTiming[];
+  /* Set when an identical earlier answer was reused instead of running the pipeline */
+  cachedFromMessageId?: string;
+  /* True when a cross-encoder reordered the candidates before selection */
+  reranked?: boolean;
+  /* Oldest history messages and lowest-ranked sources left out to fit the model's context window */
+  historyDropped?: number;
+  sourcesDropped?: number;
+  /* Citations removed because their sentence shared no words with the cited source */
+  unsupportedCitations?: number;
 }
+
 
 export interface ChatMessageView {
   id: string;

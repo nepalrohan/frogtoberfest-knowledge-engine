@@ -60,9 +60,27 @@ services:
     networks:
       - frogtoberfest-network
 
+  # Optional cross-encoder reranker for chat retrieval (set RERANKER_URL=http://localhost:8081 to use it).
+  # Start with: docker compose -f docker-compose.dev.yaml --profile reranker up -d reranker
+  # The small default model suits low-RAM machines; BAAI/bge-reranker-base ranks better but needs ~1 GB more.
+  reranker:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.8
+    container_name: frogtoberfest_reranker_dev
+    profiles: [ "reranker" ]
+    restart: unless-stopped
+    # A small batch-token cap keeps memory low; 20 chunks of ~200 tokens still fit in one batch
+    command: [ "--model-id", "${RERANKER_MODEL:-cross-encoder/ms-marco-MiniLM-L-6-v2}", "--max-batch-tokens", "4096" ]
+    ports:
+      - "8081:80"
+    volumes:
+      - frogtoberfest_reranker_models:/data
+    networks:
+      - frogtoberfest-network
+
 volumes:
   frogtoberfest_pg_data:
   frogtoberfest_redis_data:
+  frogtoberfest_reranker_models:
 networks:
   frogtoberfest-network:
     driver: bridge

@@ -4,13 +4,19 @@ import type { ChatSource } from '../chat.types';
 
 export interface ContextLimits {
   minSimilarity: number;
+  minKeywordCoverage: number;
   maxSources: number;
   maxSourcesPerDocument: number;
   contextTokenBudget: number;
 }
 
 export type ContextSelection =
-  | { kind: 'insufficient_evidence'; bestSimilarity: number }
+  | {
+      kind: 'insufficient_evidence';
+      bestSimilarity: number;
+      /* Titles of the nearest documents, so a refusal can say what was checked */
+      closestDocuments: string[];
+    }
   | {
       kind: 'selected';
       bestSimilarity: number;
@@ -22,6 +28,16 @@ export type ContextSelection =
 const normalize = (text: string): string =>
   text.replace(/\s+/g, ' ').trim().toLowerCase();
 
+const CLOSEST_DOCUMENTS_SHOWN = 3;
+
+/* Distinct document titles of the candidates, most similar first */
+function closestDocuments(candidates: ChunkCandidate[]): string[] {
+  const titles = [...candidates]
+    .sort((a, b) => b.cosineSimilarity - a.cosineSimilarity)
+    .map((c) => c.documentTitle);
+  return [...new Set(titles)].slice(0, CLOSEST_DOCUMENTS_SHOWN);
+}
+
 /* Gates on relevance, then picks diverse, non-duplicate chunks in rank order within the token budget */
 export function selectContext(
   candidates: ChunkCandidate[],
@@ -31,8 +47,16 @@ export function selectContext(
     (best, c) => Math.max(best, c.cosineSimilarity),
     0,
   );
-  if (bestSimilarity < limits.minSimilarity) {
-    return { kind: 'insufficient_evidence', bestSimilarity };
+  /* A chunk holding (nearly) every term of the question is evidence even when its vector is far, e.g. an error code */
+  const strongKeywordMatch = candidates.some(
+    (c) => c.keywordCoverage >= limits.minKeywordCoverage,
+  );
+  if (bestSimilarity < limits.minSimilarity && !strongKeywordMatch) {
+    return {
+      kind: 'insufficient_evidence',
+      bestSimilarity,
+      closestDocuments: closestDocuments(candidates),
+    };
   }
 
   const selected: ChunkCandidate[] = [];

@@ -13,7 +13,7 @@ const source = (index: number): ChatSource => ({
   documentTitle: `Doc ${index}`,
   sourceType: 'text',
   sectionHeaders: [],
-  snippet: `snippet ${index}`,
+  snippet: `Redeploy the previous release tag to roll back; freeze deploys first. (${index})`,
   score: 0.8,
   cited: false,
 });
@@ -35,6 +35,7 @@ describe('verifyCitations', () => {
         { ...source(2), cited: false },
         { ...source(3), cited: false },
       ],
+      unsupportedCitations: 0,
     });
   });
 
@@ -49,6 +50,7 @@ describe('verifyCitations', () => {
       refusalReason: 'unverifiable_citations',
       content: UNVERIFIABLE_CITATIONS_TEXT,
       sources,
+      unsupportedCitations: 0,
     });
   });
 
@@ -64,6 +66,7 @@ describe('verifyCitations', () => {
         refusalReason: 'insufficient_evidence',
         content: INSUFFICIENT_EVIDENCE_TEXT,
         sources,
+        unsupportedCitations: 0,
       });
     },
   );
@@ -97,6 +100,59 @@ describe('verifyCitations', () => {
     ).toMatchObject({
       outcome: 'refused',
       refusalReason: 'unverifiable_citations',
+    });
+  });
+
+  describe('claim support', () => {
+    const billing: ChatSource = {
+      ...source(2),
+      documentTitle: 'Billing FAQ',
+      snippet: 'Invoices are emailed on the first business day of each month.',
+    };
+
+    it('drops a citation whose sentence shares no content word with the cited source', () => {
+      const result = verifyCitations(
+        'Redeploy the previous tag [Source 1] [Source 2].',
+        [source(1), billing],
+      );
+      expect(result).toMatchObject({
+        outcome: 'answered',
+        content: 'Redeploy the previous tag [Source 1].',
+        unsupportedCitations: 1,
+      });
+      expect(result.sources.map((s) => s.cited)).toEqual([true, false]);
+    });
+
+    it('matches word forms by prefix, e.g. "redeployed" against "redeploy"', () => {
+      expect(
+        verifyCitations('Rolling releases are redeployed [Source 1].', sources),
+      ).toMatchObject({ outcome: 'answered', unsupportedCitations: 0 });
+    });
+
+    it('judges markers written after the full stop against the sentence before them', () => {
+      const result = verifyCitations(
+        'Invoices are emailed monthly. [Source 2]\nRedeploy the tag. [Source 1]',
+        [source(1), billing],
+      );
+      expect(result).toMatchObject({ unsupportedCitations: 0 });
+      expect(result.sources.every((s) => s.cited)).toBe(true);
+    });
+
+    it('refuses as unverifiable when every citation is unsupported', () => {
+      expect(
+        verifyCitations('Kubernetes autoscaling handles load [Source 2].', [billing]),
+      ).toMatchObject({
+        outcome: 'refused',
+        refusalReason: 'unverifiable_citations',
+        unsupportedCitations: 1,
+      });
+    });
+
+    it('keeps citations on claims too short to judge', () => {
+      expect(verifyCitations('See [Source 2].', [billing])).toMatchObject({
+        outcome: 'answered',
+        content: 'See [Source 2].',
+      });
     });
   });
 });

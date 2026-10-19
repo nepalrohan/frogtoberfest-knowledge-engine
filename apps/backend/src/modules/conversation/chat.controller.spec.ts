@@ -16,6 +16,7 @@ import { VectorStoreService } from '../indexing/retrieval/vector-store.service';
 import { AppConfigService } from '../../config';
 import { ChatController } from './chat.controller';
 import { ConversationService } from './conversation.service';
+import { RERANKER } from './rerank/reranker.interface';
 import { ChatTurnService } from './chat-turn.service';
 import type {
   ChatStreamEvent,
@@ -93,6 +94,7 @@ describe('Chat HTTP API', () => {
     deleteConversation: jest.fn(async (id: string) => {
       if (id !== KNOWN_ID) throw new NotFoundException();
     }),
+    findCachedAnswer: jest.fn(async () => null),
   };
 
   /* Streams a short canned answer word by word */
@@ -151,6 +153,7 @@ describe('Chat HTTP API', () => {
                 cosineSimilarity: 0.9,
                 vectorRank: 1,
                 keywordRank: 1,
+                keywordCoverage: 1,
                 rrfScore: 0.03,
               },
             ],
@@ -161,13 +164,17 @@ describe('Chat HTTP API', () => {
           useValue: {
             retrieval: {
               minSimilarity: 0.65,
+              minKeywordCoverage: 0.8,
               candidateK: 20,
               maxSources: 5,
               maxSourcesPerDocument: 2,
               contextTokenBudget: 2500,
             },
+            llm: { chatModel: 'fake-llm', numCtx: 8192, answerReserveTokens: 768 },
+            chat: { answerCacheTtlSeconds: 0 },
           },
         },
+        { provide: RERANKER, useValue: { enabled: false, rerank: jest.fn() } },
       ],
     }).compile();
 
@@ -281,6 +288,7 @@ describe('Chat HTTP API', () => {
     expect(fakeConversations.beginTurn).toHaveBeenCalledWith(
       null,
       'How do I roll back?',
+      undefined,
     );
     expect(fakeConversations.saveAnswer).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -291,12 +299,33 @@ describe('Chat HTTP API', () => {
     expect(calls).toEqual(['beginTurn', 'saveAnswer']);
   });
 
+  it('passes a retried question id through and rejects a malformed one', async () => {
+    const retryOf = '7c9e6679-7425-40de-944b-e07fc1f90ae7';
+    await request(app.getHttpServer())
+      .post(`/api/v1/chat/${KNOWN_ID}`)
+      .send({ message: 'How do I roll back?', retryOfMessageId: retryOf })
+      .buffer(true)
+      .parse(parseSse)
+      .expect(200);
+    expect(fakeConversations.beginTurn).toHaveBeenCalledWith(
+      KNOWN_ID,
+      'How do I roll back?',
+      retryOf,
+    );
+
+    await request(app.getHttpServer())
+      .post(`/api/v1/chat/${KNOWN_ID}`)
+      .send({ message: 'Hi', retryOfMessageId: 'nope' })
+      .expect(400);
+  });
+
   it('stops generation and stores the partial answer as stopped when the client disconnects', async () => {
     let generationAborted = false;
     fakeLlm.streamChat.mockImplementationOnce(
       (_messages, { onToken, signal }) =>
         new Promise((_resolve, reject) => {
-          onToken('Partial ');
+          /* A whole first sentence, so the refusal gate lets it through */
+          onToken('Partial answer. ');
           signal?.addEventListener('abort', () => {
             generationAborted = true;
             reject(new DOMException('Aborted', 'AbortError'));
@@ -331,7 +360,7 @@ describe('Chat HTTP API', () => {
     await waitFor(() => fakeConversations.saveAnswer.mock.calls.length === 1);
     expect(generationAborted).toBe(true);
     expect(fakeConversations.saveAnswer).toHaveBeenCalledWith(
-      expect.objectContaining({ status: 'stopped', content: 'Partial ' }),
+      expect.objectContaining({ status: 'stopped', content: 'Partial answer. ' }),
     );
   });
 

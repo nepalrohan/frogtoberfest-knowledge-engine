@@ -69,7 +69,7 @@ function AssistantMessage({ message, onInspect, onRetry }: MessageItemProps) {
   const sourceCount = message.sources?.length ?? 0;
   const citedCount = message.sources?.filter((s) => s.cited).length ?? 0;
   const summary = message.run
-    ? `${message.outcome === "refused" ? "Refused" : "Answered"} in ${formatMs(message.run.totalLatencyMs)}${citedCount ? ` · ${citedCount} cited` : ""}`
+    ? `${message.outcome === "refused" ? "Refused" : "Answered"} in ${formatMs(message.run.totalLatencyMs)}${citedCount ? ` · ${citedCount} cited` : ""}${message.run.cachedFromMessageId ? " · from cache" : ""}`
     : "Pipeline steps";
 
   const copy = async () => {
@@ -93,7 +93,9 @@ function AssistantMessage({ message, onInspect, onRetry }: MessageItemProps) {
         <Alert>
           {message.refusalReason === "out_of_scope" ? <ShieldAlert /> : <SearchX />}
           <AlertTitle>{REFUSAL_TITLES[message.refusalReason ?? "insufficient_evidence"]}</AlertTitle>
-          <AlertDescription>{message.content}</AlertDescription>
+          <AlertDescription>
+            <AnswerText text={message.content} />
+          </AlertDescription>
         </Alert>
       ) : (
         message.content && (

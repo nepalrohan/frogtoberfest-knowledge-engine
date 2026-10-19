@@ -4,7 +4,7 @@
 - [x] 1.2 Add TypeORM migrations (shared `buildDataSourceOptions`, CLI `data-source.ts`, `migration:*` scripts, `migrationsRun`, `synchronize` off by default) with `InitialSchema` including the HNSW cosine index, and verify run → revert → run on pgvector and a fresh app boot applying it
 - [x] 1.3 Add `embed(texts, 'query' | 'document')` with model task prefixes and `getModelName()`; worker stores `embeddingModel` and rejects wrong-width vectors with `UnrecoverableError`; verify embedding worker and provider specs pass
 - [x] 1.4 Update `docs/data-model.md` for 768-d vectors, new columns and the migration workflow
-- [ ] 1.5 Share the schema and `embed()` signature change with the indexing owner and confirm the `VectorStoreService.searchHybrid(query, vector, model, options)` signature; record the agreement in this change's design.md
+- [x] 1.5 Share the schema and `embed()` signature change with the indexing owner and confirm the `VectorStoreService.searchHybrid(query, vector, model, options)` signature; record the agreement in this change's design.md
 
 ## 2. Configuration and module skeleton
 

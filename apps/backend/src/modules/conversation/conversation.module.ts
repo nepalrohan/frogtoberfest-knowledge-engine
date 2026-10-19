@@ -9,6 +9,8 @@ import { ConversationService } from './conversation.service';
 import { ChatTurnService } from './chat-turn.service';
 import { LLM_CLIENT } from './llm/llm-client.interface';
 import { OllamaLlmClient } from './llm/ollama-llm.client';
+import { RERANKER } from './rerank/reranker.interface';
+import { TeiRerankerClient } from './rerank/tei-reranker.client';
 
 /* ConversationModule owns the chat API, conversation storage, and the grounded answer pipeline */
 @Module({
@@ -22,6 +24,7 @@ import { OllamaLlmClient } from './llm/ollama-llm.client';
     ConversationService,
     ChatTurnService,
     { provide: LLM_CLIENT, useClass: OllamaLlmClient },
+    { provide: RERANKER, useClass: TeiRerankerClient },
   ],
 })
 export class ConversationModule {}

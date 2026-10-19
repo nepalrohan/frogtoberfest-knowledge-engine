@@ -95,7 +95,7 @@ New `llm` section in `AppConfiguration` via `AppConfigService` (no `process.env`
 - **[Failed turns leave a user message without a reply; UI "Retry" re-sends it, duplicating the question in history]** → Accepted for v1; history remains readable. Revisit if it confuses users.
 - **[Filtered HNSW scans can return fewer than K rows]** → `hnsw.iterative_scan` (pgvector ≥ 0.8; `pgvector/pgvector:pg16` ships 0.8+); verify the version in the first retrieval task.
 - **[Local 7B model latency on CPU]** → Stage events keep the UI informative; quantized model default; LLM concurrency limited by the circuit breaker plus rate limit.
-- **[Indexing module boundary]** → `VectorStoreService` lives in the collaborator's module; agree the interface (`searchHybrid(query, vector, model, options)`) before implementation to avoid churn.
+- **[Indexing module boundary]** → `VectorStoreService` lives in the collaborator's module; agree the interface (`searchHybrid(query, vector, model, options)`) before implementation to avoid churn. *Shared with the indexing owner (2026-10-19): schema changes, `embed(texts, 'query' | 'document')`, `searchHybrid`, and `GET /api/v1/documents`.*
 
 ## Migration Plan
 

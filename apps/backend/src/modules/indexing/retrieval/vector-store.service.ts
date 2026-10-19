@@ -15,6 +15,8 @@ export interface ChunkCandidate {
   cosineSimilarity: number;
   vectorRank: number | null;
   keywordRank: number | null;
+  /* Share of the question's distinct stemmed terms present in the chunk (0-1) */
+  keywordCoverage: number;
   rrfScore: number;
 }
 
@@ -35,12 +37,16 @@ const SEARCHABLE = `
   AND c.embedding_model = $3`;
 
 const HYBRID_SQL = `
-  WITH query_terms AS (
+  WITH query_lexemes AS (
+    SELECT tsvector_to_array(to_tsvector('english', $2)) AS lexemes
+  ),
+  query_terms AS (
     /* OR of the question's stemmed lexemes: natural questions rarely contain every word of a passage */
     SELECT (
       SELECT string_agg(quote_literal(lexeme), ' | ')
-      FROM unnest(tsvector_to_array(to_tsvector('english', $2))) AS t(lexeme)
+      FROM unnest(ql.lexemes) AS t(lexeme)
     )::tsquery AS query
+    FROM query_lexemes ql
   ),
   vector_matches AS (
     SELECT id, ROW_NUMBER() OVER (ORDER BY distance)::int AS vector_rank
@@ -89,10 +95,16 @@ const HYBRID_SQL = `
     (1 - (c.embedding <=> $1::vector))::float8 AS cosine_similarity,
     f.vector_rank,
     f.keyword_rank,
+    COALESCE(
+      (SELECT count(*) FROM unnest(tsvector_to_array(c.search_vector)) AS l(lexeme) WHERE l.lexeme = ANY(ql.lexemes))::float8
+        / NULLIF(cardinality(ql.lexemes), 0),
+      0
+    ) AS keyword_coverage,
     f.rrf_score
   FROM fused f
   JOIN document_chunk c ON c.id = f.id
   JOIN document d ON d.id = c.document_id
+  CROSS JOIN query_lexemes ql
   ORDER BY f.rrf_score DESC, cosine_similarity DESC`;
 
 interface HybridRow {
@@ -107,6 +119,7 @@ interface HybridRow {
   cosine_similarity: number;
   vector_rank: number | null;
   keyword_rank: number | null;
+  keyword_coverage: number;
   rrf_score: number;
 }
 
@@ -145,6 +158,7 @@ export class VectorStoreService {
       cosineSimilarity: row.cosine_similarity,
       vectorRank: row.vector_rank,
       keywordRank: row.keyword_rank,
+      keywordCoverage: row.keyword_coverage,
       rrfScore: row.rrf_score,
     }));
   }
