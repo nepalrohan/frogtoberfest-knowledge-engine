@@ -64,7 +64,8 @@ export const loadConfiguration = (): AppConfiguration => ({
     password: process.env.DATABASE_PASSWORD || 'postgrespassword',
     database: process.env.DATABASE_NAME || 'frogtoberfest',
     ssl: process.env.DATABASE_SSL === 'true',
-    synchronize: process.env.DATABASE_SYNCHRONIZE === 'true' || process.env.NODE_ENV !== 'production',
+    /* Schema comes from migrations; synchronize is an explicit opt-in for throwaway databases */
+    synchronize: process.env.DATABASE_SYNCHRONIZE === 'true',
   },
   redis: {
     host: process.env.REDIS_HOST || 'localhost',
@@ -163,7 +164,7 @@ export class AppConfigService {
         password: 'postgrespassword',
         database: 'frogtoberfest',
         ssl: false,
-        synchronize: true,
+        synchronize: false,
       }
     );
   }

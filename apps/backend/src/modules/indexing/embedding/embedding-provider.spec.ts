@@ -29,7 +29,7 @@ describe('EmbeddingProvider Adapters & Factory (Phase 5)', () => {
   describe('OllamaEmbeddingAdapter', () => {
     it('should return empty array when texts array is empty', async () => {
       const adapter = new OllamaEmbeddingAdapter(mockConfigService as AppConfigService);
-      const result = await adapter.embed([]);
+      const result = await adapter.embed([], 'document');
       expect(result).toEqual([]);
       expect(adapter.getProviderName()).toBe('ollama');
       expect(adapter.getDimension()).toBe(768);
@@ -47,14 +47,17 @@ describe('EmbeddingProvider Adapters & Factory (Phase 5)', () => {
       } as any);
 
       const adapter = new OllamaEmbeddingAdapter(mockConfigService as AppConfigService);
-      const result = await adapter.embed(['chunk 1', 'chunk 2']);
+      const result = await adapter.embed(['chunk 1', 'chunk 2'], 'document');
 
       expect(result).toEqual(mockEmbeddings);
       expect(global.fetch).toHaveBeenCalledWith(
         'http://localhost:11434/api/embed',
         expect.objectContaining({
           method: 'POST',
-          body: JSON.stringify({ model: 'nomic-embed-text', input: ['chunk 1', 'chunk 2'] }),
+          body: JSON.stringify({
+            model: 'nomic-embed-text',
+            input: ['search_document: chunk 1', 'search_document: chunk 2'],
+          }),
         }),
       );
     });
@@ -73,7 +76,7 @@ describe('EmbeddingProvider Adapters & Factory (Phase 5)', () => {
         } as any);
 
       const adapter = new OllamaEmbeddingAdapter(mockConfigService as AppConfigService);
-      const result = await adapter.embed(['chunk legacy']);
+      const result = await adapter.embed(['chunk legacy'], 'query');
 
       expect(result).toEqual([mockVector]);
       expect(global.fetch).toHaveBeenCalledTimes(2);
@@ -82,7 +85,7 @@ describe('EmbeddingProvider Adapters & Factory (Phase 5)', () => {
         'http://localhost:11434/api/embeddings',
         expect.objectContaining({
           method: 'POST',
-          body: JSON.stringify({ model: 'nomic-embed-text', prompt: 'chunk legacy' }),
+          body: JSON.stringify({ model: 'nomic-embed-text', prompt: 'search_query: chunk legacy' }),
         }),
       );
     });
@@ -96,7 +99,7 @@ describe('EmbeddingProvider Adapters & Factory (Phase 5)', () => {
       } as any);
 
       const adapter = new OllamaEmbeddingAdapter(mockConfigService as AppConfigService);
-      await expect(adapter.embed(['error test'])).rejects.toThrow('Ollama embedding error [500]');
+      await expect(adapter.embed(['error test'], 'document')).rejects.toThrow('Ollama embedding error [500]');
     });
   });
 
@@ -113,7 +116,7 @@ describe('EmbeddingProvider Adapters & Factory (Phase 5)', () => {
       } as any);
 
       const adapter = new RemoteGpuEmbeddingAdapter(mockConfigService as AppConfigService);
-      const result = await adapter.embed(['remote text 1', 'remote text 2']);
+      const result = await adapter.embed(['remote text 1', 'remote text 2'], 'document');
 
       expect(result).toEqual([
         [0.01, 0.02],
@@ -139,7 +142,7 @@ describe('EmbeddingProvider Adapters & Factory (Phase 5)', () => {
       } as any);
 
       const adapter = new RemoteGpuEmbeddingAdapter(mockConfigService as AppConfigService);
-      await expect(adapter.embed(['test'])).rejects.toThrow('Remote GPU embedding error [401]');
+      await expect(adapter.embed(['test'], 'query')).rejects.toThrow('Remote GPU embedding error [401]');
     });
   });
 

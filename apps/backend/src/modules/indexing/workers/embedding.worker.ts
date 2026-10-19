@@ -1,7 +1,7 @@
 import { Injectable, Inject, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { DataSource } from 'typeorm';
-import { Worker, Job } from 'bullmq';
-import { Document, DocumentChunk } from '../../../entities';
+import { Worker, Job, UnrecoverableError } from 'bullmq';
+import { Document, DocumentChunk, EMBEDDING_VECTOR_DIMENSION } from '../../../entities';
 import { AppConfigService } from '../../../config';
 import { EMBEDDING_QUEUE_NAME, EmbeddingJobPayload } from '../../queue/queue.constants';
 import { Processor } from '../../queue/processor.decorator';
@@ -124,7 +124,19 @@ export class EmbeddingWorker implements OnModuleInit, OnModuleDestroy {
 
       /* 5. Generate vector embeddings via configured provider */
       const chunkTexts = chunks.map((c) => c.content);
-      const vectors = await this.embeddingProvider.embed(chunkTexts);
+      const vectors = await this.embeddingProvider.embed(chunkTexts, 'document');
+      const embeddingModel = this.embeddingProvider.getModelName();
+
+      /* A wrong vector count or width is a configuration fault; retrying cannot fix it */
+      const malformed =
+        vectors.length !== chunks.length ||
+        vectors.some((v) => v?.length !== EMBEDDING_VECTOR_DIMENSION);
+      if (malformed) {
+        throw new UnrecoverableError(
+          `Embedding model ${embeddingModel} returned ${vectors.length} vectors of width ${vectors[0]?.length} ` +
+            `for ${chunks.length} chunks; document_chunk.embedding expects width ${EMBEDDING_VECTOR_DIMENSION}`,
+        );
+      }
 
       /* 6. Atomic Replace in a Single TypeORM Transaction */
       await this.dataSource.transaction(async (manager) => {
@@ -150,15 +162,15 @@ export class EmbeddingWorker implements OnModuleInit, OnModuleDestroy {
         /* Delete existing chunks for this document */
         await chunkRepo.delete({ documentId });
 
-        /* Bulk insert new chunks with vector embeddings formatted for pgvector */
+        /* Bulk insert new chunks; TypeORM serializes number[] into the pgvector column */
         const chunkEntities = chunks.map((chunk, idx) => {
-          const vectorArray = vectors[idx] || [];
           return chunkRepo.create({
             documentId,
             chunkIndex: idx,
             documentVersion,
             content: chunk.content,
-            embedding: `[${vectorArray.join(',')}]`,
+            embedding: vectors[idx],
+            embeddingModel,
             tokenCount: chunk.tokenCount,
             metadata: chunk.metadata as Record<string, unknown>,
           });

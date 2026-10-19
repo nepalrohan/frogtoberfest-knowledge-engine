@@ -6,13 +6,20 @@ import {
   Index,
   ManyToOne,
   JoinColumn,
+  type IndexOptions,
 } from 'typeorm';
 import { Document } from './Document.entity';
+
+/* Vector column width; must equal the configured embedding model's output dimension */
+export const EMBEDDING_VECTOR_DIMENSION = 768;
 
 /* Stores chunked document segments and vector embeddings */
 @Entity('document_chunk')
 @Index(['documentId', 'documentVersion'])
 @Index(['documentId', 'chunkIndex'])
+/* HNSW cosine index is created by migration; synchronize:false stops TypeORM from dropping it.
+   TypeORM honours the flag at runtime but omits it from IndexOptions typings, hence the cast. */
+@Index('idx_chunk_embedding_hnsw', ['embedding'], { synchronize: false } as IndexOptions)
 export class DocumentChunk {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -29,9 +36,25 @@ export class DocumentChunk {
   @Column({ name: 'content', type: 'text' })
   content: string;
 
-  /* Vector embedding formatted as array string, e.g. '[0.012, -0.045, ...]' */
-  @Column({ name: 'embedding', type: 'text' })
-  embedding: string;
+  @Column({ name: 'embedding', type: 'vector', length: EMBEDDING_VECTOR_DIMENSION })
+  embedding: number[];
+
+  /* Model that produced the vector; retrieval only compares vectors from the same model */
+  @Column({ name: 'embedding_model', type: 'varchar', length: 128 })
+  embeddingModel: string;
+
+  /* Full-text search vector maintained by PostgreSQL for hybrid keyword retrieval */
+  @Index('idx_chunk_search_vector', { type: 'gin' })
+  @Column({
+    name: 'search_vector',
+    type: 'tsvector',
+    generatedType: 'STORED',
+    asExpression: `to_tsvector('english', "content")`,
+    select: false,
+    insert: false,
+    update: false,
+  })
+  searchVector?: string;
 
   @Column({ name: 'token_count', type: 'integer', default: 0 })
   tokenCount: number;

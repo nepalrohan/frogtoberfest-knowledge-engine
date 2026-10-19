@@ -67,11 +67,13 @@ describe('Domain Entities Contract Verification (Phase 1)', () => {
     chunk.chunkIndex = 0;
     chunk.documentVersion = 1;
     chunk.content = 'First chunk content';
-    chunk.embedding = '[0.123, -0.456, 0.789]';
+    chunk.embedding = [0.123, -0.456, 0.789];
+    chunk.embeddingModel = 'nomic-embed-text';
     chunk.tokenCount = 42;
 
     expect(chunk.chunkIndex).toBe(0);
-    expect(chunk.embedding).toContain('0.123');
+    expect(chunk.embedding).toContain(0.123);
+    expect(chunk.embeddingModel).toBe('nomic-embed-text');
     expect(chunk.tokenCount).toBe(42);
   });
 });

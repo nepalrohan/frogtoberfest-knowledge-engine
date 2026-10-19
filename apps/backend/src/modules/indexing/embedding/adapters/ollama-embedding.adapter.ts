@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { IEmbeddingProvider } from '../embedding.interface';
+import type { EmbeddingInputType, IEmbeddingProvider } from '../embedding.interface';
+import { applyTaskPrefix } from '../embedding-task-prefix';
 import { AppConfigService } from '../../../../config';
 import { StructuredLogger } from '../../../../common/logger/structured-logger';
 import { ErrorClassifier } from '../../../../common/resilience/error-classifier';
@@ -20,18 +21,23 @@ export class OllamaEmbeddingAdapter implements IEmbeddingProvider {
     return this.config.embedding.dimension;
   }
 
+  getModelName(): string {
+    return this.config.embedding.model;
+  }
+
   /* Generates embeddings for input texts in batches using local Ollama service */
-  async embed(texts: string[]): Promise<number[][]> {
+  async embed(texts: string[], inputType: EmbeddingInputType): Promise<number[][]> {
     if (!texts || texts.length === 0) {
       return [];
     }
 
     const { ollamaUrl, model } = this.config.embedding;
     const allEmbeddings: number[][] = [];
+    const inputs = applyTaskPrefix(model, inputType, texts);
 
     /* Process texts in batches to prevent payload size limits and memory pressure */
-    for (let i = 0; i < texts.length; i += this.batchSize) {
-      const batch = texts.slice(i, i + this.batchSize);
+    for (let i = 0; i < inputs.length; i += this.batchSize) {
+      const batch = inputs.slice(i, i + this.batchSize);
       try {
         const batchEmbeddings = await this.embedBatchWithOllama(ollamaUrl, model, batch);
         allEmbeddings.push(...batchEmbeddings);

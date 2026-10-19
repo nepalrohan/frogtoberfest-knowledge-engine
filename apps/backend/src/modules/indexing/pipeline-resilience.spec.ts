@@ -34,10 +34,11 @@ describe('Pipeline Resilience & Integration Suite (Phase 7)', () => {
 
     mockEmbeddingProvider = {
       embed: jest.fn().mockImplementation(async (texts: string[]) => {
-        return texts.map(() => [0.123, 0.456, 0.789]);
+        return texts.map(() => [0.123, 0.456, ...Array<number>(766).fill(0.789)]);
       }),
-      getDimension: jest.fn().mockReturnValue(3),
+      getDimension: jest.fn().mockReturnValue(768),
       getProviderName: jest.fn().mockReturnValue('ollama'),
+      getModelName: jest.fn().mockReturnValue('nomic-embed-text'),
     };
 
     mockQueue = {
@@ -46,7 +47,7 @@ describe('Pipeline Resilience & Integration Suite (Phase 7)', () => {
 
     mockConfig = {
       redis: { host: 'localhost', port: 6379 },
-      embedding: { providerType: 'ollama', dimension: 3 },
+      embedding: { providerType: 'ollama', dimension: 768 },
     };
 
     /* In-memory mock repositories simulating ACID TypeORM operations */
@@ -228,7 +229,9 @@ describe('Pipeline Resilience & Integration Suite (Phase 7)', () => {
     const savedChunks = chunksStore.get(ingestResult.documentId);
     expect(savedChunks).toBeDefined();
     expect(savedChunks!.length).toBeGreaterThan(0);
-    expect(savedChunks![0]!.embedding).toContain('[0.123,0.456,0.789]');
+    expect(savedChunks![0]!.embedding.slice(0, 3)).toEqual([0.123, 0.456, 0.789]);
+    expect(savedChunks![0]!.embedding).toHaveLength(768);
+    expect(savedChunks![0]!.embeddingModel).toBe('nomic-embed-text');
     expect(savedChunks![0]!.metadata).toHaveProperty('sectionHeaders');
   });
 
@@ -259,7 +262,8 @@ describe('Pipeline Resilience & Integration Suite (Phase 7)', () => {
         chunkIndex: 0,
         documentVersion: 2,
         content: 'v2 content',
-        embedding: '[0.999]',
+        embedding: [0.999],
+        embeddingModel: 'nomic-embed-text',
         tokenCount: 5,
         metadata: {},
         createdAt: new Date(),

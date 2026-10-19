@@ -1,7 +1,11 @@
 import { EmbeddingWorker } from './embedding.worker';
 import { Document, DocumentChunk } from '../../../entities';
-import { Job } from 'bullmq';
+import { Job, UnrecoverableError } from 'bullmq';
 import { EmbeddingJobPayload } from '../../queue/queue.constants';
+
+/* Builds a column-sized vector whose first value identifies it in assertions */
+const vectorOf = (marker: number, length = 768): number[] =>
+  Array.from({ length }, (_, i) => (i === 0 ? marker : 0.01));
 
 describe('EmbeddingWorker (Phase 6)', () => {
   let worker: EmbeddingWorker;
@@ -58,6 +62,7 @@ describe('EmbeddingWorker (Phase 6)', () => {
       embed: jest.fn(),
       getDimension: jest.fn().mockReturnValue(768),
       getProviderName: jest.fn().mockReturnValue('ollama'),
+      getModelName: jest.fn().mockReturnValue('nomic-embed-text'),
     };
 
     mockChunker = {
@@ -111,10 +116,7 @@ describe('EmbeddingWorker (Phase 6)', () => {
       },
     ]);
 
-    mockEmbeddingProvider.embed.mockResolvedValue([
-      [0.1, 0.2, 0.3],
-      [0.4, 0.5, 0.6],
-    ]);
+    mockEmbeddingProvider.embed.mockResolvedValue([vectorOf(0.1), vectorOf(0.4)]);
 
     const mockJob = {
       id: 'job-1',
@@ -131,10 +133,23 @@ describe('EmbeddingWorker (Phase 6)', () => {
 
     expect(mockDocRepo.findOne).toHaveBeenCalledWith({ where: { id: 'doc-uuid-1' } });
     expect(mockChunker.chunk).toHaveBeenCalledWith(mockDoc.normalizedContent);
-    expect(mockEmbeddingProvider.embed).toHaveBeenCalledWith(['# Guide', 'Content here']);
+    expect(mockEmbeddingProvider.embed).toHaveBeenCalledWith(['# Guide', 'Content here'], 'document');
 
     expect(mockChunkRepo.delete).toHaveBeenCalledWith({ documentId: 'doc-uuid-1' });
-    expect(mockChunkRepo.save).toHaveBeenCalledTimes(1);
+    expect(mockChunkRepo.save).toHaveBeenCalledWith([
+      expect.objectContaining({
+        chunkIndex: 0,
+        content: '# Guide',
+        embedding: vectorOf(0.1),
+        embeddingModel: 'nomic-embed-text',
+      }),
+      expect.objectContaining({
+        chunkIndex: 1,
+        content: 'Content here',
+        embedding: vectorOf(0.4),
+        embeddingModel: 'nomic-embed-text',
+      }),
+    ]);
     expect(mockManager.save).toHaveBeenCalledWith(
       expect.objectContaining({
         id: 'doc-uuid-1',
@@ -199,6 +214,39 @@ describe('EmbeddingWorker (Phase 6)', () => {
     expect(mockChunker.chunk).not.toHaveBeenCalled();
     expect(mockEmbeddingProvider.embed).not.toHaveBeenCalled();
     expect(mockDataSource.transaction).not.toHaveBeenCalled();
+  });
+
+  /* Verifies a model/column dimension mismatch fails without retries and keeps existing chunks */
+  it('should fail permanently without touching chunks when vector length differs from the column', async () => {
+    const mockDoc = {
+      id: 'doc-uuid-dim',
+      sourceType: 'upload',
+      sourceId: 'file-dim',
+      title: 'Dim Doc',
+      normalizedContent: 'Some content',
+      contentHash: 'hashdim',
+      version: 1,
+      syncStatus: 'pending_embedding',
+      metadata: {},
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as Document;
+
+    mockDocRepo.findOne.mockResolvedValue(mockDoc);
+    mockChunker.chunk.mockReturnValue([
+      { content: 'Some content', chunkIndex: 0, tokenCount: 3, metadata: { sectionHeaders: [] } },
+    ]);
+    /* A 384-d model configured against the 768-d column */
+    mockEmbeddingProvider.embed.mockResolvedValue([vectorOf(0.1, 384)]);
+
+    const mockJob = {
+      id: 'job-dim',
+      data: { documentId: 'doc-uuid-dim', documentVersion: 1, sourceType: 'upload', title: 'Dim Doc' },
+    } as unknown as Job<EmbeddingJobPayload>;
+
+    await expect(worker.process(mockJob)).rejects.toBeInstanceOf(UnrecoverableError);
+    expect(mockChunkRepo.delete).not.toHaveBeenCalled();
+    expect(mockChunkRepo.save).not.toHaveBeenCalled();
   });
 
   /* Verifies error re-thrown when embedding provider fails so BullMQ can retry */
