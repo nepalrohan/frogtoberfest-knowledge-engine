@@ -1,10 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import {
   UploadCloud,
   FileText,
   ExternalLink,
+  MessageSquare,
   Sparkles,
 } from "lucide-react";
 import {
@@ -61,6 +63,15 @@ export default function Home() {
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
               <span className="text-[11px] font-medium text-foreground">Outbox Poller: Active</span>
             </div>
+
+            <Link
+              id="chat-link"
+              href="/chat"
+              className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <MessageSquare className="w-3.5 h-3.5" />
+              <span>Ask the knowledge base</span>
+            </Link>
 
             <a
               id="swagger-docs-link"
