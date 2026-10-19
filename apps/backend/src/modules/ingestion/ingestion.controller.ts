@@ -1,6 +1,7 @@
 import {
   Controller,
   Post,
+  Get,
   Body,
   UseInterceptors,
   UploadedFile,
@@ -13,6 +14,7 @@ import 'multer';
 import { IngestionService } from './ingestion.service';
 import { FeedKnowledgeDto } from './dto/feed-knowledge.dto';
 import { IngestResponseDto } from './dto/ingest-response.dto';
+import { DocumentSummaryDto } from './dto/document-summary.dto';
 import {
   FILE_STORAGE_TOKEN,
   type IFileStorage,
@@ -26,6 +28,12 @@ export class IngestionController {
     @Inject(FILE_STORAGE_TOKEN)
     private readonly fileStorage: IFileStorage,
   ) {}
+
+  /* Recent documents with their indexing status for the ingestion feed */
+  @Get('documents')
+  async listDocuments(): Promise<DocumentSummaryDto[]> {
+    return this.ingestionService.listRecentDocuments(50);
+  }
 
   /* Ingests a single uploaded file (.md, .txt, .pdf) */
   @Post(['upload', 'ingestion/upload'])

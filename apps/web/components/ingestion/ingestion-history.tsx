@@ -1,24 +1,44 @@
 "use client";
 
 import { useState } from "react";
-import {
-  Copy,
-  Check,
-  Hash,
-  Layers,
-  ArrowUpRight,
-  ShieldCheck,
-  FileCheck2,
-} from "lucide-react";
+import { Copy, Check, Hash, Clock, CircleCheck, CircleAlert, FileCheck2 } from "lucide-react";
 import { Badge } from "@repo/ui/components/badge";
 import { Button } from "@repo/ui/components/button";
-import type { IngestResponse } from "@repo/api-client";
+import { Spinner } from "@repo/ui/components/spinner";
+import type { DocumentSummary } from "@repo/api-client";
+import { formatRelativeTime } from "@/lib/chat/format";
 
 interface IngestionHistoryProps {
-  items: IngestResponse[];
+  items: DocumentSummary[];
 }
 
-/* Minimal live feed inspector displaying ingested document versions and outbox events */
+/* Indexing badge: documents are searchable in chat only once indexed */
+function SyncStatusBadge({ status }: { status: string }) {
+  if (status === "indexed") {
+    return (
+      <Badge variant="success" className="text-[10px] gap-1 py-0.5 px-2">
+        <CircleCheck className="w-3 h-3" />
+        Indexed
+      </Badge>
+    );
+  }
+  if (status === "pending_embedding" || status === "indexing") {
+    return (
+      <Badge variant="warning" className="text-[10px] gap-1 py-0.5 px-2">
+        <Spinner className="w-3 h-3" />
+        Indexing…
+      </Badge>
+    );
+  }
+  return (
+    <Badge variant="destructive" className="text-[10px] gap-1 py-0.5 px-2 capitalize">
+      <CircleAlert className="w-3 h-3" />
+      {status.replace(/_/g, " ")}
+    </Badge>
+  );
+}
+
+/* Feed of recently ingested documents with version, hash and indexing status */
 export function IngestionHistory({ items }: IngestionHistoryProps) {
   const [copiedHash, setCopiedHash] = useState<string | null>(null);
 
@@ -35,9 +55,9 @@ export function IngestionHistory({ items }: IngestionHistoryProps) {
         <div className="p-3 rounded-full bg-background border border-border shadow-xs text-muted-foreground mb-3">
           <FileCheck2 className="w-5 h-5" />
         </div>
-        <p className="text-xs font-semibold text-foreground">No documents ingested in this session</p>
+        <p className="text-xs font-semibold text-foreground">No documents yet</p>
         <p className="text-[11px] text-muted-foreground mt-1 max-w-xs leading-relaxed">
-          Uploaded files and textual submissions will appear here with live version tracking and outbox relay status.
+          Uploaded files and text submissions appear here and show when they are ready to search in chat.
         </p>
       </div>
     );
@@ -45,9 +65,9 @@ export function IngestionHistory({ items }: IngestionHistoryProps) {
 
   return (
     <div className="space-y-3">
-      {items.map((item, idx) => (
+      {items.map((item) => (
         <div
-          key={`${item.documentId}-${item.version}-${idx}`}
+          key={item.documentId}
           className="p-3.5 rounded-lg border border-border bg-card shadow-xs transition-all space-y-2.5 animate-in fade-in"
         >
           {/* Header Row: Title & Version Badges */}
@@ -70,17 +90,7 @@ export function IngestionHistory({ items }: IngestionHistoryProps) {
             </div>
 
             <div className="shrink-0">
-              {item.isNewOrUpdated ? (
-                <Badge variant="success" className="text-[10px] gap-1 py-0.5 px-2">
-                  <ArrowUpRight className="w-3 h-3" />
-                  {item.version === 1 ? "New Document" : "Version Increment"}
-                </Badge>
-              ) : (
-                <Badge variant="warning" className="text-[10px] gap-1 py-0.5 px-2">
-                  <ShieldCheck className="w-3 h-3" />
-                  Deduplicated
-                </Badge>
-              )}
+              <SyncStatusBadge status={item.syncStatus} />
             </div>
           </div>
 
@@ -109,23 +119,13 @@ export function IngestionHistory({ items }: IngestionHistoryProps) {
               </Button>
             </div>
 
-            {/* Outbox Status */}
+            {/* Last change */}
             <div className="flex items-center justify-between px-2.5 py-1 rounded bg-muted/50">
               <span className="flex items-center gap-1.5 text-muted-foreground">
-                <Layers className="w-3 h-3 shrink-0" />
-                Outbox Relay:
+                <Clock className="w-3 h-3 shrink-0" />
+                Updated:
               </span>
-              <span className="font-medium">
-                {item.outboxEnqueued ? (
-                  <Badge variant="success" className="py-0 px-1.5 text-[9px]">
-                    Enqueued
-                  </Badge>
-                ) : (
-                  <Badge variant="muted" className="py-0 px-1.5 text-[9px]">
-                    Cached (Skipped)
-                  </Badge>
-                )}
-              </span>
+              <span className="font-medium text-foreground">{formatRelativeTime(item.updatedAt)}</span>
             </div>
           </div>
         </div>

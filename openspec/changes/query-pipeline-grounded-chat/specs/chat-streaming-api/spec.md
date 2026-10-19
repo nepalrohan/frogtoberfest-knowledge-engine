@@ -29,6 +29,10 @@ The POST endpoints SHALL respond with `Content-Type: text/event-stream`, each ev
 - **WHEN** any question is asked
 - **THEN** the first event is `meta` with the conversation id, the stored user message id, the assistant message id, the trace id and the conversation title
 
+#### Scenario: Done event carries the final text
+- **WHEN** an answer is refused after its tokens were streamed because its citations could not be verified
+- **THEN** the `done` event's `content` holds the stored refusal text, which the client shows instead of the streamed draft
+
 #### Scenario: Refusal still streams its text
 - **WHEN** the system refuses for lack of evidence
 - **THEN** the refusal text arrives as `token` events and the terminal `done` event has outcome `refused` and a refusal reason

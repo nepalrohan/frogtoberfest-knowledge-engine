@@ -9,13 +9,15 @@ import { StorageModule } from './modules/storage/storage.module';
 import { IngestionModule } from './modules/ingestion/ingestion.module';
 import { QueueModule } from './modules/queue/queue.module';
 import { IndexingModule } from './modules/indexing/indexing.module';
+import { ConversationModule } from './modules/conversation/conversation.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
       load: [configuration],
-      envFilePath: `.env.${process.env.NODE_ENV || 'development'}`,
+      /* `.env.<NODE_ENV>` takes precedence; `.env` is the shared local fallback */
+      envFilePath: [`.env.${process.env.NODE_ENV || 'development'}`, '.env'],
     }),
     AppConfigModule,
     DatabaseModule,
@@ -23,6 +25,7 @@ import { IndexingModule } from './modules/indexing/indexing.module';
     IngestionModule,
     QueueModule,
     IndexingModule,
+    ConversationModule,
   ],
   controllers: [AppController],
   providers: [AppService],

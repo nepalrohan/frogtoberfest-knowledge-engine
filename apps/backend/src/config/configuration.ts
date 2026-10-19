@@ -42,6 +42,21 @@ export interface AppConfiguration {
     maxDepth: number;
     maxRequests: number;
   };
+  llm: {
+    baseUrl: string;
+    chatModel: string;
+    temperature: number;
+    numCtx: number;
+    idleTimeoutMs: number;
+    rewriteTimeoutMs: number;
+  };
+  retrieval: {
+    minSimilarity: number;
+    candidateK: number;
+    maxSources: number;
+    maxSourcesPerDocument: number;
+    contextTokenBudget: number;
+  };
 }
 
 /* Loads raw environment configurations with fallbacks */
@@ -86,6 +101,21 @@ export const loadConfiguration = (): AppConfiguration => ({
     baseUrl: process.env.NOTION_BASE_URL || 'https://api.notion.com/v1',
     maxDepth: parseInt(process.env.NOTION_MAX_DEPTH || '5', 10),
     maxRequests: parseInt(process.env.NOTION_MAX_REQUESTS || '50', 10),
+  },
+  llm: {
+    baseUrl: process.env.LLM_BASE_URL || process.env.OLLAMA_URL || 'http://localhost:11434',
+    chatModel: process.env.GENERATION_MODEL || 'qwen2.5:7b-instruct',
+    temperature: parseFloat(process.env.LLM_TEMPERATURE || '0.1'),
+    numCtx: parseInt(process.env.LLM_NUM_CTX || '8192', 10),
+    idleTimeoutMs: parseInt(process.env.LLM_IDLE_TIMEOUT_MS || '30000', 10),
+    rewriteTimeoutMs: parseInt(process.env.LLM_REWRITE_TIMEOUT_MS || '8000', 10),
+  },
+  retrieval: {
+    minSimilarity: parseFloat(process.env.RETRIEVAL_MIN_SIMILARITY || '0.65'),
+    candidateK: parseInt(process.env.RETRIEVAL_CANDIDATE_K || '20', 10),
+    maxSources: parseInt(process.env.RETRIEVAL_MAX_SOURCES || '5', 10),
+    maxSourcesPerDocument: parseInt(process.env.RETRIEVAL_MAX_SOURCES_PER_DOCUMENT || '2', 10),
+    contextTokenBudget: parseInt(process.env.RETRIEVAL_CONTEXT_TOKEN_BUDGET || '2500', 10),
   },
 });
 
@@ -199,6 +229,19 @@ export class AppConfigService {
         maxDepth: 5,
         maxRequests: 50,
       }
+    );
+  }
+
+  /* Local chat model used for answer generation and follow-up rewriting */
+  get llm(): AppConfiguration['llm'] {
+    return this.configService.get<AppConfiguration['llm']>('app.llm') ?? loadConfiguration().llm;
+  }
+
+  /* Retrieval gating and context-selection limits */
+  get retrieval(): AppConfiguration['retrieval'] {
+    return (
+      this.configService.get<AppConfiguration['retrieval']>('app.retrieval') ??
+      loadConfiguration().retrieval
     );
   }
 }

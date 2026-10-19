@@ -5,6 +5,8 @@ import {
   IngestionJob,
   EmbeddingOutbox,
   DocumentChunk,
+  Conversation,
+  ConversationMessage,
 } from '../entities';
 import { MIGRATIONS } from './migrations';
 
@@ -24,7 +26,14 @@ export function buildDataSourceOptions(
     synchronize: db.synchronize,
     migrations: MIGRATIONS,
     migrationsRun: true,
-    entities: [Document, IngestionJob, EmbeddingOutbox, DocumentChunk],
+    entities: [
+      Document,
+      IngestionJob,
+      EmbeddingOutbox,
+      DocumentChunk,
+      Conversation,
+      ConversationMessage,
+    ],
     extra: {
       max: 20,
       idleTimeoutMillis: 30000,

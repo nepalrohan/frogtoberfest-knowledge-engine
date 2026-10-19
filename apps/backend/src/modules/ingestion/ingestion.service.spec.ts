@@ -144,4 +144,40 @@ describe('IngestionService (Phase 2)', () => {
     expect(result.outboxEnqueued).toBe(false);
     expect(mockOutboxRepo.save).not.toHaveBeenCalled();
   });
+
+  /* Verifies the ingestion feed lists live documents newest first with their indexing status */
+  it('lists recent non-deleted documents with their sync status, newest first', async () => {
+    const updatedAt = new Date('2026-10-19T10:00:00.000Z');
+    const find = jest.fn().mockResolvedValue([
+      {
+        id: 'doc-1',
+        sourceType: 'text',
+        sourceId: 'deploy-guide',
+        title: 'Deployment Guide',
+        version: 2,
+        syncStatus: 'indexed',
+        contentHash: 'abc',
+        updatedAt,
+      },
+    ]);
+    (mockDataSource as any).getRepository = jest.fn(() => ({ find }));
+
+    const result = await service.listRecentDocuments(25);
+
+    expect(result).toEqual([
+      {
+        documentId: 'doc-1',
+        sourceType: 'text',
+        sourceId: 'deploy-guide',
+        title: 'Deployment Guide',
+        version: 2,
+        syncStatus: 'indexed',
+        contentHash: 'abc',
+        updatedAt: '2026-10-19T10:00:00.000Z',
+      },
+    ]);
+    expect(find).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { deletedAt: expect.anything() }, order: { updatedAt: 'DESC' }, take: 25 }),
+    );
+  });
 });

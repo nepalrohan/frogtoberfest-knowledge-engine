@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import {
   UploadCloud,
@@ -21,16 +21,41 @@ import { Badge } from "@repo/ui/components/badge";
 import { FileUploader } from "@/components/ingestion/file-uploader";
 import { TextFeeder } from "@/components/ingestion/text-feeder";
 import { IngestionHistory } from "@/components/ingestion/ingestion-history";
-import type { IngestResponse } from "@repo/api-client";
+import type { DocumentSummary } from "@repo/api-client";
+import { apiClient } from "@/lib/api-client";
+
+/* How often the feed refreshes while any document is still being embedded */
+const INDEXING_POLL_MS = 3000;
 
 /* Enterprise Document Ingestion & Vector Synchronization Dashboard */
 export default function Home() {
   const [activeTab, setActiveTab] = useState<"file" | "text">("file");
-  const [history, setHistory] = useState<IngestResponse[]>([]);
+  const [history, setHistory] = useState<DocumentSummary[]>([]);
+  const [historyError, setHistoryError] = useState<string | null>(null);
 
-  /* Update session history upon successful ingestion or deduplication */
-  const handleIngestionSuccess = (item: IngestResponse) => {
-    setHistory((prev) => [item, ...prev]);
+  /* The feed reflects the server, so it survives reloads and shows indexing progress */
+  const refreshHistory = useCallback(async () => {
+    try {
+      setHistory(await apiClient.ingestion.listDocuments());
+      setHistoryError(null);
+    } catch {
+      setHistoryError("Couldn't load documents. Is the backend running?");
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshHistory();
+  }, [refreshHistory]);
+
+  const isIndexing = history.some((doc) => doc.syncStatus === "pending_embedding");
+  useEffect(() => {
+    if (!isIndexing) return;
+    const timer = setInterval(() => void refreshHistory(), INDEXING_POLL_MS);
+    return () => clearInterval(timer);
+  }, [isIndexing, refreshHistory]);
+
+  const handleIngestionSuccess = () => {
+    void refreshHistory();
   };
 
   return (
@@ -161,22 +186,21 @@ export default function Home() {
                     </Badge>
                   </div>
 
-                  {history.length > 0 && (
-                    <Button
-                      id="clear-history-button"
-                      type="button"
-                      variant="ghost"
-                      size="xs"
-                      onClick={() => setHistory([])}
-                      className="h-6 text-[11px] text-muted-foreground hover:text-foreground"
-                    >
-                      Clear
-                    </Button>
-                  )}
+                  <Button
+                    id="refresh-history-button"
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    onClick={() => void refreshHistory()}
+                    className="h-6 text-[11px] text-muted-foreground hover:text-foreground"
+                  >
+                    Refresh
+                  </Button>
                 </div>
                 <CardDescription className="text-xs text-muted-foreground mt-1">
-                  Real-time document versions, SHA-256 hashes, and outbox relay events.
+                  Latest documents with their version, SHA-256 hash, and indexing status.
                 </CardDescription>
+                {historyError && <p className="text-xs text-destructive mt-1">{historyError}</p>}
               </CardHeader>
 
               <CardContent>

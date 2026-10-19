@@ -1,8 +1,9 @@
 import { Injectable } from '@nestjs/common';
-import { DataSource } from 'typeorm';
+import { DataSource, IsNull } from 'typeorm';
 import { Document, EmbeddingOutbox } from '../../entities';
 import { MarkdownNormalizer, NormalizerOptions } from './normalizer/markdown-normalizer';
 import { IngestResponseDto } from './dto/ingest-response.dto';
+import { DocumentSummaryDto } from './dto/document-summary.dto';
 import { StructuredLogger } from '../../common/logger/structured-logger';
 import { LogEvents } from '../../common/logger/log-events';
 import { TraceContextPropagator } from '../../common/telemetry/trace-context.propagator';
@@ -143,5 +144,34 @@ export class IngestionService {
     });
 
     return result;
+  }
+
+  /* Recent live documents with their indexing status, newest activity first */
+  async listRecentDocuments(limit = 50): Promise<DocumentSummaryDto[]> {
+    const documents = await this.dataSource.getRepository(Document).find({
+      select: {
+        id: true,
+        sourceType: true,
+        sourceId: true,
+        title: true,
+        version: true,
+        syncStatus: true,
+        contentHash: true,
+        updatedAt: true,
+      },
+      where: { deletedAt: IsNull() },
+      order: { updatedAt: 'DESC' },
+      take: limit,
+    });
+    return documents.map((doc) => ({
+      documentId: doc.id,
+      sourceType: doc.sourceType,
+      sourceId: doc.sourceId,
+      title: doc.title,
+      version: doc.version,
+      syncStatus: doc.syncStatus,
+      contentHash: doc.contentHash,
+      updatedAt: doc.updatedAt.toISOString(),
+    }));
   }
 }

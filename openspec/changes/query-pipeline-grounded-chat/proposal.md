@@ -26,6 +26,6 @@ The Knowledge Engine can ingest and index documents, but nobody can ask it anyth
 
 - **Backend**: New `apps/backend/src/modules/conversation/` module (controller, services, LLM adapter, entities) registered in `AppModule`; a new migration in `src/database/migrations/`; new config section (`llm`) in `AppConfigService`; new `LogEvents` use (`RETRIEVAL_*`, `CHAT_REQUEST_*`).
 - **Indexing boundary**: Retrieval reads chunks through a `VectorStoreService` exported by the indexing module (per `docs/architecture.md`), and reuses the exported `EMBEDDING_PROVIDER_TOKEN`. No changes to ingestion or the embedding worker.
-- **Shared contract**: `packages/api-client/src/modules/chat.ts` is the wire contract; the backend implements it unchanged. The web app switches from mock to live with `NEXT_PUBLIC_CHAT_API_MODE=live`.
+- **Shared contract**: `packages/api-client/src/modules/chat.ts` is the wire contract; the backend implements it unchanged. The web app's in-browser mock was removed once the backend was complete; the UI always calls the real API.
 - **Dependencies**: `@nestjs/throttler` for rate limiting. Ollama must serve a chat model (default `qwen2.5:7b-instruct`) in addition to `nomic-embed-text`.
 - **Docs**: `docs/retrieval-and-citations.md` and `docs/implementation-plan.md` updated for SSE streaming and the final contract.

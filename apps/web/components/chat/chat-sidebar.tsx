@@ -35,9 +35,7 @@ import {
   AlertDialogTitle,
 } from "@repo/ui/components/alert-dialog";
 import { Button } from "@repo/ui/components/button";
-import { Badge } from "@repo/ui/components/badge";
 import { Skeleton } from "@repo/ui/components/skeleton";
-import { isMockChat } from "@/lib/chat/chat-api";
 import { useChat } from "./chat-provider";
 
 interface ConversationGroup {
@@ -95,11 +93,6 @@ export function ChatSidebar() {
               KE
             </div>
             <span className="text-sm font-semibold tracking-tight">Knowledge Engine</span>
-            {isMockChat && (
-              <Badge variant="outline" className="ml-auto font-mono text-[10px]">
-                mock
-              </Badge>
-            )}
           </div>
           <SidebarMenu>
             <SidebarMenuItem>

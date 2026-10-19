@@ -19,7 +19,9 @@ export const EMBEDDING_VECTOR_DIMENSION = 768;
 @Index(['documentId', 'chunkIndex'])
 /* HNSW cosine index is created by migration; synchronize:false stops TypeORM from dropping it.
    TypeORM honours the flag at runtime but omits it from IndexOptions typings, hence the cast. */
-@Index('idx_chunk_embedding_hnsw', ['embedding'], { synchronize: false } as IndexOptions)
+@Index('idx_chunk_embedding_hnsw', ['embedding'], {
+  synchronize: false,
+} as IndexOptions)
 export class DocumentChunk {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -36,7 +38,11 @@ export class DocumentChunk {
   @Column({ name: 'content', type: 'text' })
   content: string;
 
-  @Column({ name: 'embedding', type: 'vector', length: EMBEDDING_VECTOR_DIMENSION })
+  @Column({
+    name: 'embedding',
+    type: 'vector',
+    length: EMBEDDING_VECTOR_DIMENSION,
+  })
   embedding: number[];
 
   /* Model that produced the vector; retrieval only compares vectors from the same model */

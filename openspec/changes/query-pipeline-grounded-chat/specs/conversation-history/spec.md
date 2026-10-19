@@ -40,6 +40,10 @@ The system SHALL store an answer interrupted by the client as status `stopped` w
 - **WHEN** the client disconnects after 20 tokens were streamed
 - **THEN** an assistant message with status `stopped` and those 20 tokens is stored and is not used as history for the next question
 
+#### Scenario: Stopped answer is identifiable in history
+- **WHEN** a conversation containing a stopped answer is fetched
+- **THEN** that message is returned with `status: "stopped"`, and other messages carry no status
+
 ### Requirement: Listing conversations
 The system SHALL list conversations newest-updated first, each with id, title, a preview of the last message (at most 90 characters, whitespace collapsed), message count and last-updated time.
 

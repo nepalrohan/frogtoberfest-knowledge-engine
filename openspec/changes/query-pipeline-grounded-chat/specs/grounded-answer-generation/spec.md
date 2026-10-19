@@ -19,11 +19,15 @@ The system SHALL generate answers with the configured local chat model at temper
 - **THEN** the client receives multiple `token` events before the `done` event
 
 ### Requirement: Citation verification
-After generation the system SHALL extract every `[Source N]` marker, mark each provided source as cited or not, and treat markers whose N is not a provided source as invalid. Invalid markers SHALL be removed from the stored answer. If the answer contains no valid citation, the system SHALL refuse with reason `unverifiable_citations` instead of returning the answer.
+After generation the system SHALL first rewrite common marker variants (for example `[Source Document 1]`, `[source 1]`, `[Source 1, 2]`, `[Sources 1 and 2]`) into canonical `[Source N]` markers, then extract every `[Source N]` marker, mark each provided source as cited or not, and treat markers whose N is not a provided source as invalid. Invalid markers SHALL be removed from the stored answer. If the answer contains no valid citation, the system SHALL refuse with reason `unverifiable_citations` instead of returning the answer.
 
 #### Scenario: Hallucinated source number
 - **WHEN** 3 sources were provided and the model writes "[Source 7]" alongside valid "[Source 1]" citations
 - **THEN** "[Source 7]" is removed from the stored answer, Source 1 is marked cited, and the outcome is `answered`
+
+#### Scenario: Citation variant from a small model
+- **WHEN** the model cites a provided source as "[Source Document 1]"
+- **THEN** the stored answer contains "[Source 1]", Source 1 is marked cited, and the outcome is `answered`
 
 #### Scenario: Answer without any valid citation
 - **WHEN** the model's answer cites no provided source

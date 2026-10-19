@@ -3,7 +3,9 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { ChatMessage, ChatStreamEvent, ConversationSummary, PipelineStage } from "@repo/api-client";
-import { chatApi } from "@/lib/chat/chat-api";
+import { apiClient } from "@/lib/api-client";
+
+const chatApi = apiClient.chat;
 
 /* Thread key used for a conversation that has not been created on the server yet. */
 export const NEW_THREAD_KEY = "__new__";
@@ -16,7 +18,7 @@ export interface StageState {
 }
 
 /* Client-side view of a message: the persisted shape plus live streaming state. */
-export interface UiMessage extends ChatMessage {
+export interface UiMessage extends Omit<ChatMessage, "status"> {
   status: MessageStatus;
   stages?: Partial<Record<PipelineStage, StageState>>;
   error?: { code: string; message: string; retryable: boolean };
@@ -43,7 +45,7 @@ interface ChatContextValue {
 const ChatContext = createContext<ChatContextValue | null>(null);
 
 function toUiMessage(message: ChatMessage): UiMessage {
-  return { ...message, status: "complete" };
+  return { ...message, status: message.status === "stopped" ? "stopped" : "complete" };
 }
 
 /* Owns conversations and live streams at layout level, so a stream survives the /chat -> /chat/[id] navigation. */
@@ -166,6 +168,8 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
           case "done":
             updateAssistant((m) => ({
               ...m,
+              /* The stored text wins over streamed tokens, e.g. a refusal replacing an unverifiable draft */
+              content: event.content,
               status: "complete",
               outcome: event.outcome,
               refusalReason: event.refusalReason,

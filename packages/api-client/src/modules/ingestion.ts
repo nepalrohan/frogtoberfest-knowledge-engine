@@ -12,6 +12,18 @@ export interface IngestResponse {
   outboxEnqueued: boolean;
 }
 
+/* Current state of one ingested document; syncStatus moves from pending_embedding to indexed */
+export interface DocumentSummary {
+  documentId: string;
+  sourceType: string;
+  sourceId: string;
+  title: string;
+  version: number;
+  syncStatus: string;
+  contentHash: string;
+  updatedAt: string;
+}
+
 export interface FeedKnowledgePayload {
   title: string;
   content: string;
@@ -23,6 +35,7 @@ export interface FeedKnowledgePayload {
 export interface IngestionApi {
   upload(file: File | Blob, filename?: string): Promise<IngestResponse>;
   feedKnowledge(payload: FeedKnowledgePayload): Promise<IngestResponse>;
+  listDocuments(): Promise<DocumentSummary[]>;
 }
 
 /* Factory creating the Ingestion API client methods */
@@ -41,6 +54,11 @@ export function createIngestionApi(http: AxiosInstance): IngestionApi {
           'Content-Type': 'multipart/form-data',
         },
       });
+      return response.data;
+    },
+
+    async listDocuments(): Promise<DocumentSummary[]> {
+      const response = await http.get<DocumentSummary[]>('/api/v1/documents');
       return response.data;
     },
 

@@ -3,20 +3,12 @@
 import { BookOpenText } from "lucide-react";
 import { Button } from "@repo/ui/components/button";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@repo/ui/components/empty";
-import { isMockChat } from "@/lib/chat/chat-api";
 
 const SUGGESTIONS = [
   "What is our incident escalation process for a SEV1?",
   "How do I roll back a bad deploy?",
   "Why did we choose pgvector over a vector database?",
   "What's the on-call swap rule before taking leave?",
-];
-
-/* Scenarios that exercise the mock's non-happy paths. */
-const MOCK_SCENARIOS = [
-  { label: "Insufficient evidence", question: "How do we configure Kubernetes autoscaling?" },
-  { label: "Out of scope", question: "What's the weather like today?" },
-  { label: "LLM failure", question: "Simulate a fail during the deploy rollback answer" },
 ];
 
 interface ChatEmptyStateProps {
@@ -50,16 +42,6 @@ export function ChatEmptyState({ onPick }: ChatEmptyStateProps) {
             </Button>
           ))}
         </div>
-        {isMockChat && (
-          <div className="flex flex-wrap items-center justify-center gap-1.5 pt-2 text-xs text-muted-foreground">
-            <span>Try mock scenarios:</span>
-            {MOCK_SCENARIOS.map((scenario) => (
-              <Button key={scenario.label} size="xs" variant="ghost" onClick={() => onPick(scenario.question)}>
-                {scenario.label}
-              </Button>
-            ))}
-          </div>
-        )}
       </EmptyContent>
     </Empty>
   );

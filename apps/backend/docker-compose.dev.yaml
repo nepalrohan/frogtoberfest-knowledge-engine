@@ -1,3 +1,4 @@
+
 services:
   jaeger:
     image: jaegertracing/all-in-one:latest # PIN THE VERSION

@@ -7,7 +7,7 @@ What already exists and is reused:
 - **Embeddings** (`modules/indexing/embedding`): `IEmbeddingProvider.embed(texts, 'query' | 'document')` applies model task prefixes; `getModelName()` identifies the vector space. Exported from `IndexingModule` as `EMBEDDING_PROVIDER_TOKEN`.
 - **Cross-cutting** (`src/common`): `AppTracer.traceSpan`, `TraceContextPropagator`, `StructuredLogger` + `LogEvents` (`RETRIEVAL_*`, `CHAT_REQUEST_*` already defined), `CircuitBreaker`, `RetryPolicy`, `ErrorClassifier`.
 - **HTTP**: global prefix `api`, URI versioning, CORS with credentials (a `*` origin is already mapped to `WEB_URL`), global `ValidationPipe`.
-- **Wire contract**: `packages/api-client/src/modules/chat.ts` (types + SSE client). The web UI (`apps/web/components/chat/*`) and its mock (`apps/web/lib/chat/mock-chat-api.ts`) are the executable reference for event order and payloads.
+- **Wire contract**: `packages/api-client/src/modules/chat.ts` (types + SSE client). The web UI (`apps/web/components/chat/*`) consumes it directly (its development mock was removed once this change was implemented).
 
 Constraints from `AGENTS.md` and `docs/`: modular monolith, local Ollama only, block comments, config via `AppConfigService`, W3C trace propagation, `[Source N]` citations or explicit refusal, no autonomous agents.
 
@@ -50,7 +50,7 @@ Validation (DTO with `class-validator`: trimmed, 1–2000 chars) and the 404 che
 *Alternatives*: GET + `EventSource` with a two-step "create then stream" handshake (extra round trip, harder retries); WebSockets (bidirectional channel not needed).
 
 ### 3. Cancellation via one AbortController per turn
-The controller creates an `AbortController` and aborts it on `req.on('close')` when the response has not finished. The signal is passed to the embedding call, the SQL query (via `pg` query cancel on abort), and the Ollama `fetch`. On abort the turn stores the partial answer as `stopped` and writes nothing further.
+The controller creates an `AbortController` and aborts it on `req.on('close')` when the response has not finished. The signal is passed to the embedding call and the Ollama `fetch`; the retrieval SQL is checked before and after (it completes in milliseconds, so it is not cancelled mid-query). On abort the turn stores the partial answer as `stopped` and writes nothing further.
 
 ### 4. Message storage: sources and run as JSONB
 `conversation_message` follows `docs/data-model.md` with these refinements:
@@ -63,9 +63,9 @@ The assistant message id is generated up front (`crypto.randomUUID()`) so `meta`
 
 ### 5. Hybrid retrieval in one SQL statement
 The `docs/retrieval-and-citations.md` CTE (vector top-20 ⟗ keyword top-20, RRF k=60) with these changes:
-- Keyword side uses the stored `search_vector` and `websearch_to_tsquery('english', $q)` (tolerates arbitrary user text), ranked by `ts_rank_cd`.
+- Keyword side uses the stored `search_vector` and an **OR** of the question's stemmed lexemes (`tsvector_to_array(to_tsvector('english', $q))`, each `quote_literal`-ed), ranked by `ts_rank_cd`. *Changed during implementation*: `websearch_to_tsquery` ANDs every word, so "How do I roll back a bad deploy?" did not match "To roll back, redeploy the previous release tag"; OR + coverage ranking keeps exact-identifier hits while letting partial matches rank. A stopword-only question yields no keyword side.
 - Both sides filter `d.deleted_at IS NULL AND d.sync_status = 'indexed' AND c.document_version = d.version AND c.embedding_model = $model`.
-- Runs in a transaction with `SET LOCAL hnsw.ef_search = 100` and `SET LOCAL hnsw.iterative_scan = relaxed_order` (pgvector ≥ 0.8) so the filters cannot starve the top-20 vector list.
+- Runs in a transaction with transaction-local `hnsw.ef_search = max(100, 2·K)` and `hnsw.iterative_scan = relaxed_order` (verified on pgvector 0.8.7) so the filters cannot starve the top-K vector list. The vector side orders and limits in an inner query so the HNSW index drives the scan (confirmed with `EXPLAIN`); ranks are numbered outside it.
 - Returns cosine similarity, both ranks and the RRF score; the relevance gate (best cosine ≥ `minSimilarity`, default 0.65) and context selection happen in TypeScript.
 
 ### 6. LLM client: Ollama `/api/chat` streaming
@@ -74,7 +74,7 @@ The `docs/retrieval-and-citations.md` CTE (vector top-20 ⟗ keyword top-20, RRF
 
 ### 7. Prompt and citation verification
 Prompt order: system rules (from `docs/retrieval-and-citations.md` plus the instruction-hierarchy rule from `docs/security.md`), then the last ≤ 6 completed messages as chat history, then a user turn containing the `<source_document id="N" title="…">` blocks followed by the question.
-`CitationVerifier` is a pure function: extract `[Source N]`, drop invalid N, mark `cited`, decide outcome (`answered`, `refused/unverifiable_citations`, or `refused/insufficient_evidence` when the model emits the fallback phrase). Since tokens are already streamed, a post-hoc refusal is signalled by `done.outcome = 'refused'`; the UI renders the refusal state from `done`, and the stored content is the refusal text.
+`CitationVerifier` is a pure function: normalize marker variants (small local models such as `phi4-mini` write `[Source Document 1]`), extract `[Source N]`, drop invalid N, mark `cited`, decide outcome (`answered`, `refused/unverifiable_citations`, or `refused/insufficient_evidence` when the model emits the fallback phrase). Since tokens are already streamed, a post-hoc refusal is signalled by `done.outcome = 'refused'`; the UI renders the refusal state from `done`, and the stored content is the refusal text.
 
 ### 8. Configuration
 New `llm` section in `AppConfiguration` via `AppConfigService` (no `process.env` elsewhere): `baseUrl` (default `OLLAMA_URL`), `chatModel` (`GENERATION_MODEL`, default `qwen2.5:7b-instruct`), `temperature` (0.1), `numCtx` (8192), `idleTimeoutMs` (30000), `rewriteTimeoutMs` (8000). New `retrieval` section: `minSimilarity` (0.65), `candidateK` (20), `maxSources` (5), `maxSourcesPerDocument` (2), `contextTokenBudget` (2500).
@@ -101,7 +101,7 @@ New `llm` section in `AppConfiguration` via `AppConfigService` (no `process.env`
 
 1. Add migration `AddConversations` (tables `conversation`, `conversation_message`, index `(conversation_id, created_at)`); it runs automatically on startup and is reversible with `pnpm migration:revert`.
 2. Add `ollama` service to `docker-compose.dev.yaml` (if the team agrees) and pull `qwen2.5:7b-instruct` + `nomic-embed-text`.
-3. Deploy the backend; then set `NEXT_PUBLIC_CHAT_API_MODE=live` in the web app. Rollback: unset it (UI falls back to the mock) and revert the migration.
+3. Deploy the backend and web app together. Rollback: revert both and run `pnpm migration:revert`.
 
 ## Open Questions
 

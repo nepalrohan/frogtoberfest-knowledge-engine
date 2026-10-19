@@ -69,6 +69,8 @@ export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   createdAt: string;
+  /* Present only when the client stopped the answer mid-stream */
+  status?: 'stopped';
   outcome?: AnswerOutcome;
   refusalReason?: RefusalReason;
   sources?: ChatSource[];
@@ -111,6 +113,8 @@ export type ChatStreamEvent =
   | {
       type: 'done';
       outcome: AnswerOutcome;
+      /* Final stored text; replaces the streamed tokens when the answer was refused or cleaned */
+      content: string;
       refusalReason?: RefusalReason;
       citedIndexes: number[];
       run: RunDetails;

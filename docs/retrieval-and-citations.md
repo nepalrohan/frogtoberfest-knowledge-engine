@@ -34,6 +34,8 @@ Standard fixed-character chunkers destroy table structures and orphan code block
 
 ## 🔍 Hybrid Retrieval Architecture
 
+> **As implemented** (`apps/backend/src/modules/indexing/retrieval/vector-store.service.ts`): only chunks whose document is not deleted, is `indexed`, matches the chunk's `document_version`, and whose `embedding_model` equals the active model are searched. The keyword side ORs the question's stemmed lexemes against the stored `search_vector` (an AND query rarely matches natural questions). The relevance gate (`RETRIEVAL_MIN_SIMILARITY`, default 0.65) and context selection (≤ 5 sources, ≤ 2 per document, token budget) run after fusion. The SQL below is the original sketch.
+
 To achieve high recall across conceptual questions and keyword lookups, KE implements **Hybrid Search**:
 
 ```mermaid
@@ -176,39 +178,29 @@ export async function getRecentConversationHistory(
 
 ### 2. Conversation API Contracts
 
-#### `POST /api/v1/chat`
-**Request**:
-```json
-{
-  "conversationId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-  "message": "Where are the Docker compose files located?",
-  "userId": "usr_dev_1"
-}
+The wire contract lives in `packages/api-client/src/modules/chat.ts`; the backend implements it in `apps/backend/src/modules/conversation/`.
+
+| Endpoint | Response |
+| :--- | :--- |
+| `GET /api/v1/chat` | Conversations, newest activity first: `id`, `title`, `lastMessagePreview`, `messageCount`, `updatedAt` |
+| `GET /api/v1/chat/:id` | Full history; assistant messages carry `outcome`, `refusalReason`, `sources[]` (all context sources, each with `cited`), `run` (trace id, models, tokens, stage timings) and `status: "stopped"` when interrupted |
+| `DELETE /api/v1/chat/:id` | `204` |
+| `POST /api/v1/chat` / `POST /api/v1/chat/:id` | `{ "message": string }` (1–2000 chars) → **server-sent event stream** |
+
+Answers stream as SSE (`text/event-stream`, one JSON object per `data:` line), in this order:
+
+```
+meta     { conversationId, userMessageId, assistantMessageId, traceId, conversationTitle }
+stage*   { stage: rewrite|embed|retrieve|select|generate|verify, status: started|completed, durationMs? }
+sources  { sources: ChatSource[] }            -- omitted when refusing for lack of evidence
+token*   { delta }
+done     { outcome, refusalReason?, content, citedIndexes, run }   -- or --
+error    { code, message, retryable }         -- e.g. LLM_UNAVAILABLE
 ```
 
-**Response (200 OK)**:
-```json
-{
-  "conversationId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-  "messageId": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
-  "role": "assistant",
-  "content": "The Docker compose configuration files are located in the repository root under `docker-compose.yaml` [Source 1].",
-  "citations": [
-    {
-      "sourceIndex": 1,
-      "documentId": "4a1c5d9e-1111-2222-3333-444455556666",
-      "title": "Local Environment Setup",
-      "sourceUrl": "https://notion.so/org/Local-Setup-12345",
-      "snippet": "The Docker compose configuration files are located in the repository root..."
-    }
-  ],
-  "metadata": {
-    "model": "qwen2.5:7b-instruct",
-    "latencyMs": 840,
-    "chunksRetrieved": 5
-  }
-}
-```
+`done.content` is the stored text and replaces the streamed tokens (for example when an unverifiable draft becomes a refusal). Validation errors (400), unknown conversations (404) and rate limiting (429, 20 questions/min per client) are returned as plain HTTP errors before any stream opens. Closing the request cancels generation and stores the partial answer as `stopped`.
+
+Follow-up questions are rewritten into a standalone search query (`rewrite` stage, falls back to the original after `LLM_REWRITE_TIMEOUT_MS`); the answer prompt always uses the user's original wording.
 
 ---
 
