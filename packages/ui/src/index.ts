@@ -19,4 +19,5 @@ export * from "./components/input-group";
 export * from "./components/message";
 export * from "./components/bubble";
 export * from "./components/message-scroller";
+export * from "./components/sonner";
 export * from "./lib/utils";

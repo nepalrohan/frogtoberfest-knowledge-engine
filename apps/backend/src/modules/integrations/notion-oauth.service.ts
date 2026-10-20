@@ -2,12 +2,14 @@ import {
   BadRequestException,
   Injectable,
   InternalServerErrorException,
+  Optional,
 } from '@nestjs/common';
 import * as crypto from 'crypto';
 import { AppConfigService } from '../../config/configuration';
 import { StructuredLogger } from '../../common/logger';
 import { AppTracer } from '../../common/telemetry';
 import { CircuitBreaker, RetryPolicy } from '../../common/resilience';
+import { OAuthStateService } from '../connector-persistence';
 
 export interface OAuthStateEntry {
   state: string;
@@ -48,7 +50,11 @@ export class NotionOAuthService {
   private readonly retryPolicy: RetryPolicy;
   private fetchFn: typeof fetch;
 
-  constructor(private readonly configService: AppConfigService) {
+  constructor(
+    private readonly configService: AppConfigService,
+    @Optional()
+    private readonly oauthStateService?: OAuthStateService,
+  ) {
     this.circuitBreaker = new CircuitBreaker({
       name: 'NotionOAuthTokenExchange',
       failureThreshold: 3,
@@ -78,7 +84,11 @@ export class NotionOAuthService {
   }
 
   /* Generates a 32-byte cryptographically secure state with a 10-minute TTL */
-  generateState(userId: string = 'default-user'): string {
+  async generateState(userId: string = 'default-user'): Promise<string> {
+    if (this.oauthStateService) {
+      return this.oauthStateService.generateState('notion', userId);
+    }
+
     const state = crypto.randomBytes(32).toString('hex');
     const now = new Date();
     const expiresAt = new Date(now.getTime() + this.ttlMs);
@@ -97,10 +107,10 @@ export class NotionOAuthService {
   }
 
   /* Constructs the authoritative Notion OAuth authorization URL */
-  generateAuthorizationUrl(userId: string = 'default-user'): {
+  async generateAuthorizationUrl(userId: string = 'default-user'): Promise<{
     authorizationUrl: string;
     state: string;
-  } {
+  }> {
     const config = this.configService.notion;
     if (!config.clientId) {
       throw new InternalServerErrorException(
@@ -108,7 +118,7 @@ export class NotionOAuthService {
       );
     }
 
-    const state = this.generateState(userId);
+    const state = await this.generateState(userId);
     const authUrl = new URL(config.authorizationUrl);
 
     authUrl.searchParams.set('client_id', config.clientId);
@@ -129,9 +139,13 @@ export class NotionOAuthService {
   }
 
   /* Validates the state parameter and consumes it immediately to prevent replay attacks */
-  validateAndConsumeState(state: string): boolean {
+  async validateAndConsumeState(state: string): Promise<boolean> {
     if (!state) {
       return false;
+    }
+
+    if (this.oauthStateService) {
+      return this.oauthStateService.validateAndConsumeState(state, 'notion');
     }
 
     const entry = this.states.get(state);

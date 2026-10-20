@@ -1,18 +1,23 @@
 import { notFound, redirect } from "next/navigation";
-import { getNotionStatus } from "@/lib/api";
-import { INITIAL_PICKED, PAGE_TREES, SOURCE_NAMES } from "@/lib/sample-data";
+import { getNotionPages, getNotionStatus } from "@/lib/api";
+import { SOURCE_NAMES } from "@/lib/sample-data";
 import { PagePicker } from "./page-picker";
 
-/* Page tree is reference sample data until the backend exposes the workspace's pages */
+/* Retrieves live Notion workspace pages and user selections from backend */
 export default async function ChoosePagesPage({ params }: PageProps<"/integrations/[source]/pages">) {
   const { source } = await params;
   if (source !== "notion") notFound();
 
   /* The picker is only reachable from a connected source */
-  const notion = await getNotionStatus();
+  const [notion, pagesData] = await Promise.all([getNotionStatus(), getNotionPages()]);
   if (!notion?.connected) redirect("/integrations");
 
   return (
-    <PagePicker sourceName={SOURCE_NAMES.notion} tree={PAGE_TREES.notion} initialPicked={INITIAL_PICKED.notion} />
+    <PagePicker
+      sourceName={SOURCE_NAMES.notion}
+      workspaceName={notion.workspaceName ?? undefined}
+      tree={pagesData.pages}
+      initialPicked={pagesData.selectedPageIds}
+    />
   );
 }

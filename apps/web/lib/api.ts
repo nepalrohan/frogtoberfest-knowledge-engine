@@ -1,18 +1,46 @@
-import { cache } from "react";
 import { createHttpApiClient } from "@repo/api-client";
 
-/* Server-only client: the admin key authorizes every backend call and must never reach the browser */
+const getBaseUrl = () => {
+  return (
+    process.env.NEXT_PUBLIC_BACKEND_URL ||
+    process.env.BACKEND_URL ||
+    "http://localhost:5003"
+  );
+};
+
+const getAdminKey = () => {
+  return (
+    process.env.NEXT_PUBLIC_ADMIN_API_KEY ||
+    process.env.ADMIN_API_KEY ||
+    "supersecretkey"
+  );
+};
+
+/* Unified HTTP API client powered by Axios from @repo/api-client */
 export const api = createHttpApiClient({
-  baseURL: `${process.env.BACKEND_URL ?? "http://localhost:5000"}/api`,
-  getAuthToken: () => process.env.ADMIN_API_KEY,
+  baseURL: `${getBaseUrl().replace(/\/+$/, "")}/api`,
+  getAuthToken: getAdminKey,
+  headers: {
+    "x-admin-key": getAdminKey(),
+  },
 });
 
-/* Deduplicated per request so the sidebar and the Sources page share one call; null means the backend is unreachable */
-export const getNotionStatus = cache(async () => {
+/* Retrieves non-sensitive active Notion connection status */
+export const getNotionStatus = async () => {
   try {
     return await api.notion.getStatus();
   } catch (error) {
     console.error("Failed to load Notion status", error);
     return null;
   }
-});
+};
+
+/* Retrieves live Notion workspace pages and currently selected IDs from the backend */
+export const getNotionPages = async () => {
+  try {
+    return await api.notion.getPages();
+  } catch (error) {
+    console.error("Failed to load Notion pages", error);
+    return { pages: [], selectedPageIds: [] };
+  }
+};

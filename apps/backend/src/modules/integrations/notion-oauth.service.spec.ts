@@ -32,36 +32,37 @@ describe('NotionOAuthService', () => {
   });
 
   describe('State Management & Anti-CSRF', () => {
-    it('should generate a 64-character hex state string', () => {
-      const state = service.generateState('user-1');
+    it('should generate a 64-character hex state string', async () => {
+      const state = await service.generateState('user-1');
       expect(state).toHaveLength(64);
     });
 
-    it('should validate and consume state exactly once', () => {
-      const state = service.generateState('user-1');
+    it('should validate and consume state exactly once', async () => {
+      const state = await service.generateState('user-1');
 
       /* First validation succeeds */
-      const firstValid = service.validateAndConsumeState(state);
+      const firstValid = await service.validateAndConsumeState(state);
       expect(firstValid).toBe(true);
 
       /* Replay attack fails */
-      const secondValid = service.validateAndConsumeState(state);
+      const secondValid = await service.validateAndConsumeState(state);
       expect(secondValid).toBe(false);
     });
 
-    it('should reject unknown states', () => {
-      const valid = service.validateAndConsumeState('unknown-state-token');
+    it('should reject unknown states', async () => {
+      const valid = await service.validateAndConsumeState('unknown-state-token');
       expect(valid).toBe(false);
     });
 
-    it('should reject empty or null state', () => {
-      expect(service.validateAndConsumeState('')).toBe(false);
+    it('should reject empty or null state', async () => {
+      expect(await service.validateAndConsumeState('')).toBe(false);
     });
   });
 
   describe('Authorization URL Generation', () => {
-    it('should build a valid Notion OAuth authorization URL with correct parameters', () => {
-      const { authorizationUrl, state } = service.generateAuthorizationUrl('user-1');
+    it('should build a valid Notion OAuth authorization URL with correct parameters', async () => {
+      const { authorizationUrl, state } =
+        await service.generateAuthorizationUrl('user-1');
 
       expect(authorizationUrl).toBeDefined();
       expect(state).toBeDefined();

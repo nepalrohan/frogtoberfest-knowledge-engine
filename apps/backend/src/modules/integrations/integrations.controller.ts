@@ -2,15 +2,18 @@ import {
   Controller,
   Get,
   Post,
+  Body,
   Query,
   Req,
   Res,
   HttpStatus,
   UseGuards,
+  BadRequestException,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { AppConfigService } from '../../config/configuration';
 import { NotionOAuthService } from './notion-oauth.service';
+import { NotionPagesService } from './notion-pages.service';
 import { ConnectionStorageService } from './connection-storage.service';
 import { StructuredLogger } from '../../common/logger';
 import { AdminAuthGuard } from '../../common/guards/admin-auth.guard';
@@ -18,6 +21,11 @@ import {
   NotionAuthorizeResponseDto,
   NotionConnectionStatusDto,
   NotionDisconnectResponseDto,
+  NotionPagesResponseDto,
+  SaveNotionPagesDto,
+  SaveNotionPagesResponseDto,
+  ConnectNotionTokenDto,
+  ConnectNotionTokenResponseDto,
 } from './dto';
 
 /* Controller handling Notion OAuth authorization lifecycle and connection status */
@@ -28,18 +36,19 @@ export class IntegrationsController {
   constructor(
     private readonly configService: AppConfigService,
     private readonly notionOAuthService: NotionOAuthService,
+    private readonly notionPagesService: NotionPagesService,
     private readonly connectionStorageService: ConnectionStorageService,
-  ) {}
+  ) { }
 
   /* Initiates OAuth authorization flow by returning the Notion authorization URL */
   @Get('oauth/authorize')
   @UseGuards(AdminAuthGuard)
-  authorize(
+  async authorize(
     @Req() req: Request & { user?: { id: string; role: string } },
-  ): NotionAuthorizeResponseDto {
+  ): Promise<NotionAuthorizeResponseDto> {
     const userId = req.user?.id || 'admin-user';
     const { authorizationUrl } =
-      this.notionOAuthService.generateAuthorizationUrl(userId);
+      await this.notionOAuthService.generateAuthorizationUrl(userId);
     return { authorizationUrl };
   }
 
@@ -66,7 +75,10 @@ export class IntegrationsController {
     }
 
     /* Validate anti-CSRF state */
-    if (!state || !this.notionOAuthService.validateAndConsumeState(state)) {
+    const isValidState = await this.notionOAuthService.validateAndConsumeState(
+      state || '',
+    );
+    if (!state || !isValidState) {
       this.logger.warn('Notion OAuth callback received invalid or expired state', {
         state: state ? '[PROVIDED]' : '[MISSING]',
       });
@@ -134,6 +146,7 @@ export class IntegrationsController {
         workspaceName: null,
         workspaceIcon: null,
         connectedAt: null,
+        selectedPagesCount: 0,
       };
     }
 
@@ -143,6 +156,86 @@ export class IntegrationsController {
       workspaceName: conn.workspace_name,
       workspaceIcon: conn.workspace_icon,
       connectedAt: conn.updated_at.toISOString(),
+      selectedPagesCount: conn.selected_page_ids?.length ?? 0,
+    };
+  }
+
+  /* Retrieves available pages from Notion API and returns current user selections */
+  @Get('pages')
+  @UseGuards(AdminAuthGuard)
+  async getPages(): Promise<NotionPagesResponseDto> {
+    const conn = await this.connectionStorageService.getConnection('notion');
+    if (!conn || conn.status !== 'connected') {
+      return { pages: [], selectedPageIds: [] };
+    }
+
+    const token = await this.connectionStorageService.getDecryptedToken('notion');
+    if (!token) {
+      return { pages: [], selectedPageIds: [] };
+    }
+
+    const pages = await this.notionPagesService.fetchWorkspacePages(token);
+    const selectedPageIds = await this.connectionStorageService.getSelectedPages('notion');
+
+    return {
+      pages,
+      selectedPageIds,
+    };
+  }
+
+  /* Saves user-selected Notion page IDs (can be empty array to decouple connection from document selection) */
+  @Post('pages')
+  @UseGuards(AdminAuthGuard)
+  async savePages(
+    @Body() body: SaveNotionPagesDto,
+  ): Promise<SaveNotionPagesResponseDto> {
+    const conn = await this.connectionStorageService.getConnection('notion');
+    if (!conn || conn.status !== 'connected') {
+      throw new BadRequestException('Notion workspace is not connected');
+    }
+
+    const pageIds = Array.isArray(body?.pageIds) ? body.pageIds : [];
+    const updated = await this.connectionStorageService.saveSelectedPages('notion', pageIds);
+
+    return {
+      success: true,
+      selectedCount: updated.length,
+      selectedPageIds: updated,
+    };
+  }
+
+  /* Connects directly via Notion Internal Integration Token, bypassing OAuth page picker */
+  @Post('token')
+  @UseGuards(AdminAuthGuard)
+  async connectWithToken(
+    @Body() body: ConnectNotionTokenDto,
+  ): Promise<ConnectNotionTokenResponseDto> {
+    if (!body?.token || typeof body.token !== 'string' || !body.token.trim()) {
+      throw new BadRequestException('Notion token is required');
+    }
+
+    const token = body.token.trim();
+    const workspaceInfo = await this.notionPagesService.validateTokenAndGetWorkspace(
+      token,
+      body.workspaceName,
+    );
+
+    await this.connectionStorageService.saveConnection({
+      workspaceId: workspaceInfo.workspaceId,
+      workspaceName: workspaceInfo.workspaceName,
+      workspaceIcon: workspaceInfo.workspaceIcon,
+      accessToken: token,
+      connectedBy: 'admin-user',
+    });
+
+    this.logger.log('Notion connected successfully via integration token', {
+      workspaceId: workspaceInfo.workspaceId,
+      workspaceName: workspaceInfo.workspaceName,
+    });
+
+    return {
+      success: true,
+      workspaceName: workspaceInfo.workspaceName,
     };
   }
 

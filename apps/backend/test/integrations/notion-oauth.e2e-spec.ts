@@ -1,8 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { INestApplication, VersioningType } from '@nestjs/common';
+import { INestApplication, ValidationPipe, VersioningType } from '@nestjs/common';
 import request from 'supertest';
 import { AppModule } from '../../src/app.module';
 import { NotionOAuthService } from '../../src/modules/integrations/notion-oauth.service';
+import { NotionPagesService } from '../../src/modules/integrations/notion-pages.service';
 import { ConnectionStorageService } from '../../src/modules/integrations/connection-storage.service';
 import { AppConfigService } from '../../src/config/configuration';
 
@@ -10,6 +11,7 @@ import { AppConfigService } from '../../src/config/configuration';
 describe('Notion OAuth Integration (e2e contract)', () => {
   let app: INestApplication;
   let oAuthService: NotionOAuthService;
+  let pagesService: NotionPagesService;
   let storageService: ConnectionStorageService;
   let configService: AppConfigService;
   let adminKey: string;
@@ -23,6 +25,24 @@ describe('Notion OAuth Integration (e2e contract)', () => {
     workspace_id: 'workspace_uuid_12345',
   };
 
+  const mockNotionSearchResults = {
+    object: 'list',
+    results: [
+      {
+        id: 'page-doc-1',
+        object: 'page',
+        parent: { type: 'workspace', workspace: true },
+        properties: {
+          title: {
+            type: 'title',
+            title: [{ plain_text: 'Knowledge Base Main' }],
+          },
+        },
+      },
+    ],
+    has_more: false,
+  };
+
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
@@ -31,9 +51,17 @@ describe('Notion OAuth Integration (e2e contract)', () => {
     app = moduleFixture.createNestApplication();
     app.setGlobalPrefix('api');
     app.enableVersioning({ type: VersioningType.URI });
+    app.useGlobalPipes(
+      new ValidationPipe({
+        whitelist: true,
+        forbidNonWhitelisted: true,
+        transform: true,
+      }),
+    );
     await app.init();
 
     oAuthService = app.get(NotionOAuthService);
+    pagesService = app.get(NotionPagesService);
     storageService = app.get(ConnectionStorageService);
     configService = app.get(AppConfigService);
     adminKey = configService.adminApiKey || 'default-admin-api-key-for-dev';
@@ -47,10 +75,33 @@ describe('Notion OAuth Integration (e2e contract)', () => {
           json: async () => mockNotionTokenResponse,
         });
       }
+      if (url.includes('/search')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => mockNotionSearchResults,
+        });
+      }
+      if (url.includes('/users/me')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            object: 'user',
+            id: 'bot_token_user',
+            type: 'bot',
+            bot: {
+              owner: { type: 'workspace', workspace: true },
+              workspace_name: 'Internal Token Workspace',
+            },
+          }),
+        });
+      }
       return Promise.reject(new Error(`Unexpected outbound network call to ${url}`));
     });
 
     oAuthService.setFetchFunction(mockFetch as unknown as typeof fetch);
+    pagesService.setFetchFunction(mockFetch as unknown as typeof fetch);
   });
 
   beforeEach(async () => {
@@ -66,6 +117,11 @@ describe('Notion OAuth Integration (e2e contract)', () => {
     /* Status endpoint requires admin key */
     await request(app.getHttpServer())
       .get('/api/v1/integrations/notion/status')
+      .expect(401);
+
+    /* Pages endpoint requires admin key */
+    await request(app.getHttpServer())
+      .get('/api/v1/integrations/notion/pages')
       .expect(401);
 
     /* Authorize endpoint requires admin key */
@@ -91,6 +147,7 @@ describe('Notion OAuth Integration (e2e contract)', () => {
       workspaceName: null,
       workspaceIcon: null,
       connectedAt: null,
+      selectedPagesCount: 0,
     });
 
     /* Strict verification of zero token leakage */
@@ -242,6 +299,7 @@ describe('Notion OAuth Integration (e2e contract)', () => {
       workspaceName: null,
       workspaceIcon: null,
       connectedAt: null,
+      selectedPagesCount: 0,
     });
 
     /* Token cannot be retrieved */
@@ -254,5 +312,96 @@ describe('Notion OAuth Integration (e2e contract)', () => {
       .set('x-admin-key', adminKey)
       .expect(201);
     expect(repeatDisconnect.body.success).toBe(true);
+  });
+
+  it('Scenario 7: Document retrieval via Notion Search API, page selection, and decoupling zero pages', async () => {
+    /* Setup active connection */
+    await storageService.saveConnection({
+      workspaceId: 'workspace_uuid_12345',
+      workspaceName: 'Antigravity Workspace',
+      workspaceIcon: null,
+      accessToken: 'secret_test_notion_access_token_super_confidential_999',
+      connectedBy: 'admin-user',
+    });
+
+    /* 1. Retrieve pages from Notion API */
+    const pagesRes = await request(app.getHttpServer())
+      .get('/api/v1/integrations/notion/pages')
+      .set('x-admin-key', adminKey)
+      .expect(200);
+
+    expect(pagesRes.body.pages).toHaveLength(1);
+    expect(pagesRes.body.pages[0]).toMatchObject({
+      id: 'page-doc-1',
+      title: 'Knowledge Base Main',
+      depth: 0,
+    });
+    expect(pagesRes.body.selectedPageIds).toEqual([]);
+
+    /* 2. Decoupled selection: save zero selected pages, Notion remains connected */
+    const zeroSaveRes = await request(app.getHttpServer())
+      .post('/api/v1/integrations/notion/pages')
+      .set('x-admin-key', adminKey)
+      .send({ pageIds: [] })
+      .expect(201);
+
+    expect(zeroSaveRes.body).toEqual({
+      success: true,
+      selectedCount: 0,
+      selectedPageIds: [],
+    });
+
+    const statusAfterZero = await request(app.getHttpServer())
+      .get('/api/v1/integrations/notion/status')
+      .set('x-admin-key', adminKey)
+      .expect(200);
+    expect(statusAfterZero.body.connected).toBe(true);
+    expect(statusAfterZero.body.selectedPagesCount).toBe(0);
+
+    /* 3. User selects document and saves */
+    const saveRes = await request(app.getHttpServer())
+      .post('/api/v1/integrations/notion/pages')
+      .set('x-admin-key', adminKey)
+      .send({ pageIds: ['page-doc-1'] })
+      .expect(201);
+
+    expect(saveRes.body).toEqual({
+      success: true,
+      selectedCount: 1,
+      selectedPageIds: ['page-doc-1'],
+    });
+
+    /* 4. Verify selection is persisted and accessible on re-query */
+    const recheckedPages = await request(app.getHttpServer())
+      .get('/api/v1/integrations/notion/pages')
+      .set('x-admin-key', adminKey)
+      .expect(200);
+    expect(recheckedPages.body.selectedPageIds).toEqual(['page-doc-1']);
+  });
+
+  it('Scenario 8: Direct integration token connection establishes connection with zero required pages', async () => {
+    const tokenRes = await request(app.getHttpServer())
+      .post('/api/v1/integrations/notion/token')
+      .set('x-admin-key', adminKey)
+      .send({
+        token: 'secret_direct_internal_token_999',
+        workspaceName: 'Internal Token Workspace',
+      })
+      .expect(201);
+
+    expect(tokenRes.body).toEqual({
+      success: true,
+      workspaceName: 'Internal Token Workspace',
+    });
+
+    /* Status confirms connection without any pre-selected pages */
+    const statusRes = await request(app.getHttpServer())
+      .get('/api/v1/integrations/notion/status')
+      .set('x-admin-key', adminKey)
+      .expect(200);
+
+    expect(statusRes.body.connected).toBe(true);
+    expect(statusRes.body.workspaceName).toBe('Internal Token Workspace');
+    expect(statusRes.body.selectedPagesCount).toBe(0);
   });
 });

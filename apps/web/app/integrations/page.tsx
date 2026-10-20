@@ -1,103 +1,122 @@
-import Link from "next/link";
 import type { NotionConnectionStatus } from "@repo/api-client";
-import { Alert, Button, Card } from "@repo/ui";
+import { Button, Card } from "@repo/ui";
 import { getNotionStatus } from "@/lib/api";
 import { PageHeader } from "@/app/components/page-header";
-import { StatusDot, type StatusTone } from "@/app/components/status-dot";
 import { NotionActions } from "./components/notion-actions";
 import { SourceRow } from "./components/source-row";
-
-const ERROR_MESSAGES: Record<string, string> = {
-  invalid_state: "Notion authorization expired or was invalid. Try connecting again.",
-  missing_code: "Notion didn't return an authorization code. Try connecting again.",
-  exchange_failed: "Couldn't finish connecting to Notion. Try again.",
-  authorize_failed: "Couldn't start Notion authorization. Check that the backend is running.",
-  disconnect_failed: "Couldn't disconnect Notion. Try again.",
-};
-
-type SearchParams = Record<string, string | string[] | undefined>;
-
-/* Maps the OAuth callback / server action redirect query into a one-off banner */
-function getBanner(params: SearchParams): { tone: StatusTone; text: string } | null {
-  const workspace = typeof params.workspace === "string" ? params.workspace : null;
-  switch (params.status) {
-    case "success":
-      return { tone: "ok", text: workspace ? `Notion workspace “${workspace}” connected.` : "Notion connected." };
-    case "disconnected":
-      return { tone: "ok", text: "Notion disconnected." };
-    case "cancelled":
-      return { tone: "warn", text: "Notion authorization was cancelled. No changes were made." };
-    case "error":
-      return {
-        tone: "danger",
-        text: ERROR_MESSAGES[String(params.message)] ?? "Something went wrong connecting to Notion.",
-      };
-    default:
-      return null;
-  }
-}
+import { IntegrationToaster } from "./components/integration-toaster";
 
 function describeNotion(status: NotionConnectionStatus | null) {
   if (!status) {
     return {
       state: "Unavailable",
       tone: "danger" as const,
-      description: "Couldn't reach the backend. Check BACKEND_URL and ADMIN_API_KEY.",
+      description: "Could not reach the backend service.",
+      helperText: "Check backend server status and API configuration.",
     };
   }
   if (!status.connected) {
-    return { state: "Not connected", tone: "idle" as const, description: "Pages and databases from your workspace." };
+    return {
+      state: "Not connected",
+      tone: "idle" as const,
+      description: "Connect your Notion workspace to search across documentation, meeting notes, and knowledge bases.",
+      helperText: "Grants read-only access to pages and databases you choose to share.",
+    };
   }
   const connectedOn = status.connectedAt
     ? ` · connected ${new Intl.DateTimeFormat("en", { dateStyle: "medium" }).format(new Date(status.connectedAt))}`
     : "";
+  const pagesText = status.selectedPagesCount !== undefined
+    ? ` · ${status.selectedPagesCount} ${status.selectedPagesCount === 1 ? "page" : "pages"} selected`
+    : "";
+
   return {
     state: "Connected",
     tone: "ok" as const,
-    description: `${status.workspaceName ?? "Workspace"}${connectedOn}`,
+    description: `${status.workspaceName ?? "Notion Workspace"}${connectedOn}${pagesText}`,
+    helperText: "Read-only access active. You can choose documents now or update your selection anytime.",
   };
 }
 
-export default async function SourcesPage({ searchParams }: PageProps<"/integrations">) {
-  const [params, notion] = await Promise.all([searchParams, getNotionStatus()]);
-  const banner = getBanner(params);
+export default async function SourcesPage() {
+  const notion = await getNotionStatus();
   const connected = Boolean(notion?.connected);
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-6">
+      <IntegrationToaster />
+
       <PageHeader
-        title="Sources"
-        description="Connect a workspace, then choose which pages the assistant can use."
+        title="Knowledge Sources"
+        description="Connect third-party workspaces. The assistant reads documents you choose to answer questions."
       />
 
-      {banner && (
-        <Alert className="flex items-center gap-3">
-          <StatusDot tone={banner.tone} className="size-2" />
-          <span className="flex-1">{banner.text}</span>
-          <Button variant="subtle" size="text" nativeButton={false} render={<Link href="/integrations" />}>
-            Dismiss
-          </Button>
-        </Alert>
-      )}
+      <Card className="gap-0 py-0 overflow-hidden shadow-xs">
+        <SourceRow
+          name="Notion"
+          connected={connected}
+          {...describeNotion(notion)}
+        >
+          <NotionActions
+            connected={connected}
+            selectedPagesCount={notion?.selectedPagesCount}
+          />
+        </SourceRow>
 
-      <Card className="gap-0 py-0">
-        <SourceRow name="Notion" connected={connected} {...describeNotion(notion)}>
-          <NotionActions connected={connected} />
+        <SourceRow
+          name="Confluence"
+          state="Not connected"
+          tone="idle"
+          description="Sync team spaces, requirements, and design docs from Confluence Cloud."
+          helperText="Read-only space indexing coming soon."
+        >
+          <Button disabled size="compact">
+            Connect
+          </Button>
         </SourceRow>
-        {/* No Confluence backend yet, so Connect stays disabled */}
-        <SourceRow name="Confluence" state="Not connected" tone="idle" description="Spaces and pages from Confluence Cloud.">
-          <Button disabled>Connect</Button>
-        </SourceRow>
-        <SourceRow name="Google Drive" state="Planned" tone="idle" description="Shared drives and folders.">
-          <Button variant="outline" disabled>
+
+        <SourceRow
+          name="Google Drive"
+          state="Planned"
+          tone="idle"
+          description="Index shared drives, folders, and Google Docs."
+          helperText="Support planned in upcoming release."
+        >
+          <Button variant="outline" disabled size="compact">
             Coming soon
           </Button>
         </SourceRow>
       </Card>
 
-      <p className="text-[12.5px] text-muted-foreground">
-        Access tokens are encrypted on the server and never shown here.
-      </p>
+      {/* Permission & Security Information */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
+        <div className="rounded-lg border bg-card/50 p-4 space-y-1.5">
+          <h4 className="text-xs font-semibold text-foreground flex items-center gap-2">
+            <span>🔒</span> Read-Only Permissions
+          </h4>
+          <p className="text-[12px] text-muted-foreground leading-relaxed">
+            The assistant only reads content from pages you select. It cannot modify, delete, or re-share any documents in your workspace.
+          </p>
+        </div>
+
+        <div className="rounded-lg border bg-card/50 p-4 space-y-1.5">
+          <h4 className="text-xs font-semibold text-foreground flex items-center gap-2">
+            <span>📑</span> Granular Document Choice
+          </h4>
+          <p className="text-[12px] text-muted-foreground leading-relaxed">
+            You can connect your workspace first and choose documents later, select zero pages, or change your selections at any time.
+          </p>
+        </div>
+
+        <div className="rounded-lg border bg-card/50 p-4 space-y-1.5">
+          <h4 className="text-xs font-semibold text-foreground flex items-center gap-2">
+            <span>🛡️</span> Zero Browser Exposure
+          </h4>
+          <p className="text-[12px] text-muted-foreground leading-relaxed">
+            All access tokens are encrypted with AES-256-GCM on the backend and are never sent to or stored in the browser.
+          </p>
+        </div>
+      </div>
     </div>
   );
 }

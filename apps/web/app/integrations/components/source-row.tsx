@@ -8,6 +8,7 @@ interface SourceRowProps {
   state: string;
   tone: StatusTone;
   description: string;
+  helperText?: string;
   children: ReactNode;
 }
 
@@ -17,29 +18,37 @@ export function SourceRow({
   state,
   tone,
   description,
+  helperText,
   children,
 }: SourceRowProps) {
   return (
-    <div className="flex items-center gap-3.5 border-b px-4.5 py-4">
-      <div
-        className={cn(
-          "grid size-10 shrink-0 place-items-center rounded-[9px] border text-base font-semibold",
-          connected ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground",
-        )}
-      >
-        {name[0]}
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <span className="font-semibold">{name}</span>
-          <span className="inline-flex items-center gap-1.25 text-xs text-muted-foreground">
-            <StatusDot tone={tone} />
-            {state}
-          </span>
+    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b px-5 py-5 last:border-b-0 hover:bg-muted/10 transition-colors">
+      <div className="flex items-start gap-4 min-w-0">
+        <div
+          className={cn(
+            "grid size-10 shrink-0 place-items-center rounded-lg border text-base font-semibold shadow-xs",
+            connected ? "bg-primary text-primary-foreground border-primary" : "bg-muted text-muted-foreground",
+          )}
+        >
+          {name[0]}
         </div>
-        <p className="text-[13px] text-muted-foreground">{description}</p>
+        <div className="min-w-0 flex-1 space-y-1">
+          <div className="flex items-center gap-2.5">
+            <span className="font-medium text-sm text-foreground">{name}</span>
+            <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+              <StatusDot tone={tone} className="size-1.5" />
+              {state}
+            </span>
+          </div>
+          <p className="text-xs text-muted-foreground leading-normal">{description}</p>
+          {helperText && (
+            <p className="text-[11.5px] text-muted-foreground/80 leading-normal">{helperText}</p>
+          )}
+        </div>
       </div>
-      <div className="flex gap-2">{children}</div>
+      <div className="flex items-center gap-2 self-start sm:self-center shrink-0">
+        {children}
+      </div>
     </div>
   );
 }

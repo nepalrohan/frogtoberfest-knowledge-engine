@@ -27,6 +27,14 @@ export interface AppConfiguration {
     redirectUri: string;
     authorizationUrl: string;
   };
+  database: {
+    host: string;
+    port: number;
+    username: string;
+    password: string;
+    database: string;
+    url?: string;
+  };
 }
 
 /* Loads raw environment configurations with fallbacks */
@@ -40,6 +48,14 @@ export const loadConfiguration = (): AppConfiguration => ({
     process.env.ENCRYPTION_SECRET || 'knowledge-engine-secret-key-32b-min!',
   adminApiKey: process.env.ADMIN_API_KEY || 'default-admin-api-key-for-dev',
   appVersion: process.env.APP_VERSION || '1.0.0',
+  database: {
+    host: process.env.POSTGRES_HOST || 'localhost',
+    port: parseInt(process.env.POSTGRES_PORT || '5432', 10),
+    username: process.env.POSTGRES_USER || 'postgres',
+    password: process.env.POSTGRES_PASSWORD || 'postgrespassword',
+    database: process.env.POSTGRES_DB || 'frogtoberfest',
+    url: process.env.DATABASE_URL,
+  },
   otel: {
     serviceName: process.env.OTEL_ATTR_SERVICE_NAME || 'Knowledge_Engine',
     serviceVersion: process.env.OTEL_ATTR_SERVICE_VERSION || '1.0',
@@ -188,6 +204,19 @@ export class AppConfigService {
           'notion.authorizationUrl',
           'https://api.notion.com/v1/oauth/authorize',
         ),
+      }
+    );
+  }
+
+  get database(): AppConfiguration['database'] {
+    return (
+      this.configService.get<AppConfiguration['database']>('app.database') ?? {
+        host: this.configService.get<string>('database.host', 'localhost'),
+        port: this.configService.get<number>('database.port', 5432),
+        username: this.configService.get<string>('database.username', 'postgres'),
+        password: this.configService.get<string>('database.password', 'postgrespassword'),
+        database: this.configService.get<string>('database.database', 'frogtoberfest'),
+        url: this.configService.get<string>('database.url'),
       }
     );
   }

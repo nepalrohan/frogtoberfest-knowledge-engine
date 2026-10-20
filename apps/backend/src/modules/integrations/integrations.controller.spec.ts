@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { IntegrationsController } from './integrations.controller';
 import { NotionOAuthService } from './notion-oauth.service';
+import { NotionPagesService } from './notion-pages.service';
 import { ConnectionStorageService } from './connection-storage.service';
 import { AppConfigService } from '../../config/configuration';
 import { AdminAuthGuard } from '../../common/guards/admin-auth.guard';
@@ -9,6 +10,7 @@ import { Response } from 'express';
 describe('IntegrationsController', () => {
   let controller: IntegrationsController;
   let mockOAuthService: Partial<NotionOAuthService>;
+  let mockPagesService: Partial<NotionPagesService>;
   let mockStorageService: Partial<ConnectionStorageService>;
   let mockConfigService: Partial<AppConfigService>;
 
@@ -26,9 +28,23 @@ describe('IntegrationsController', () => {
       exchangeCodeForToken: jest.fn(),
     };
 
+    mockPagesService = {
+      fetchWorkspacePages: jest.fn().mockResolvedValue([
+        { id: 'page-1', title: 'Roadmap', depth: 0, meta: '2 pages' },
+      ]),
+      validateTokenAndGetWorkspace: jest.fn().mockResolvedValue({
+        workspaceId: 'ws-token-1',
+        workspaceName: 'Token Workspace',
+        workspaceIcon: null,
+      }),
+    };
+
     mockStorageService = {
       saveConnection: jest.fn(),
       getConnection: jest.fn(),
+      getDecryptedToken: jest.fn(),
+      getSelectedPages: jest.fn(),
+      saveSelectedPages: jest.fn(),
       disconnect: jest.fn(),
     };
 
@@ -37,6 +53,7 @@ describe('IntegrationsController', () => {
       providers: [
         { provide: AppConfigService, useValue: mockConfigService },
         { provide: NotionOAuthService, useValue: mockOAuthService },
+        { provide: NotionPagesService, useValue: mockPagesService },
         { provide: ConnectionStorageService, useValue: mockStorageService },
       ],
     }).compile();
@@ -45,9 +62,9 @@ describe('IntegrationsController', () => {
   });
 
   describe('GET oauth/authorize', () => {
-    it('should return authorization URL', () => {
+    it('should return authorization URL', async () => {
       const mockReq = { user: { id: 'admin-user', role: 'ADMIN' } } as any;
-      const result = controller.authorize(mockReq);
+      const result = await controller.authorize(mockReq);
       expect(result).toEqual({
         authorizationUrl:
           'https://api.notion.com/v1/oauth/authorize?state=test-state',
@@ -160,6 +177,7 @@ describe('IntegrationsController', () => {
         workspaceName: null,
         workspaceIcon: null,
         connectedAt: null,
+        selectedPagesCount: 0,
       });
     });
 
@@ -180,6 +198,86 @@ describe('IntegrationsController', () => {
         workspaceName: 'Acme Workspace',
         workspaceIcon: 'https://example.com/icon.png',
         connectedAt: now.toISOString(),
+        selectedPagesCount: 0,
+      });
+    });
+  });
+
+  describe('GET pages', () => {
+    it('should return empty pages and selections if disconnected', async () => {
+      (mockStorageService.getConnection as jest.Mock).mockResolvedValue(null);
+
+      const result = await controller.getPages();
+      expect(result).toEqual({ pages: [], selectedPageIds: [] });
+    });
+
+    it('should fetch pages from NotionPagesService and return selectedPageIds', async () => {
+      (mockStorageService.getConnection as jest.Mock).mockResolvedValue({
+        status: 'connected',
+      });
+      (mockStorageService.getDecryptedToken as jest.Mock).mockResolvedValue('test-token');
+      (mockStorageService.getSelectedPages as jest.Mock).mockResolvedValue(['page-1']);
+
+      const result = await controller.getPages();
+      expect(result).toEqual({
+        pages: [{ id: 'page-1', title: 'Roadmap', depth: 0, meta: '2 pages' }],
+        selectedPageIds: ['page-1'],
+      });
+      expect(mockPagesService.fetchWorkspacePages).toHaveBeenCalledWith('test-token');
+    });
+  });
+
+  describe('POST pages', () => {
+    it('should save selected page IDs and return updated selection count', async () => {
+      (mockStorageService.getConnection as jest.Mock).mockResolvedValue({
+        status: 'connected',
+      });
+      (mockStorageService.saveSelectedPages as jest.Mock).mockResolvedValue(['page-1', 'page-2']);
+
+      const response = await controller.savePages({ pageIds: ['page-1', 'page-2'] });
+      expect(response).toEqual({
+        success: true,
+        selectedCount: 2,
+        selectedPageIds: ['page-1', 'page-2'],
+      });
+      expect(mockStorageService.saveSelectedPages).toHaveBeenCalledWith('notion', ['page-1', 'page-2']);
+    });
+
+    it('should allow saving zero selected pages (decoupling connection from document selection)', async () => {
+      (mockStorageService.getConnection as jest.Mock).mockResolvedValue({
+        status: 'connected',
+      });
+      (mockStorageService.saveSelectedPages as jest.Mock).mockResolvedValue([]);
+
+      const response = await controller.savePages({ pageIds: [] });
+      expect(response).toEqual({
+        success: true,
+        selectedCount: 0,
+        selectedPageIds: [],
+      });
+    });
+  });
+
+  describe('POST token', () => {
+    it('should validate token and persist connection without OAuth page picker', async () => {
+      const response = await controller.connectWithToken({
+        token: 'secret_integration_token',
+        workspaceName: 'Engineering Workspace',
+      });
+
+      expect(mockPagesService.validateTokenAndGetWorkspace).toHaveBeenCalledWith(
+        'secret_integration_token',
+        'Engineering Workspace',
+      );
+      expect(mockStorageService.saveConnection).toHaveBeenCalledWith(
+        expect.objectContaining({
+          accessToken: 'secret_integration_token',
+          workspaceName: 'Token Workspace',
+        }),
+      );
+      expect(response).toEqual({
+        success: true,
+        workspaceName: 'Token Workspace',
       });
     });
   });
@@ -197,12 +295,21 @@ describe('IntegrationsController', () => {
   });
 
   describe('Admin Guard Protection', () => {
-    it('should have AdminAuthGuard applied to authorize, getStatus, and disconnect', () => {
+    it('should have AdminAuthGuard applied to all management endpoints', () => {
       const authorizeGuards = Reflect.getMetadata('__guards__', controller.authorize);
       expect(authorizeGuards).toContain(AdminAuthGuard);
 
       const statusGuards = Reflect.getMetadata('__guards__', controller.getStatus);
       expect(statusGuards).toContain(AdminAuthGuard);
+
+      const pagesGuards = Reflect.getMetadata('__guards__', controller.getPages);
+      expect(pagesGuards).toContain(AdminAuthGuard);
+
+      const savePagesGuards = Reflect.getMetadata('__guards__', controller.savePages);
+      expect(savePagesGuards).toContain(AdminAuthGuard);
+
+      const tokenGuards = Reflect.getMetadata('__guards__', controller.connectWithToken);
+      expect(tokenGuards).toContain(AdminAuthGuard);
 
       const disconnectGuards = Reflect.getMetadata('__guards__', controller.disconnect);
       expect(disconnectGuards).toContain(AdminAuthGuard);

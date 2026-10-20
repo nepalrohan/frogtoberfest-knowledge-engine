@@ -130,9 +130,35 @@ describe('ConnectionStorageService', () => {
       const conn = await service.getConnection('notion');
       expect(conn?.status).toBe('disconnected');
       expect(conn?.credential_ref).toBe('');
+      expect(conn?.selected_page_ids).toEqual([]);
 
       const token = await service.getDecryptedToken('notion');
       expect(token).toBeNull();
+    });
+
+    it('should save and retrieve selected pages independently from connection state', async () => {
+      await service.saveConnection({
+        workspaceId: 'ws-123',
+        workspaceName: 'Acme Corp',
+        workspaceIcon: null,
+        accessToken: 'secret_token_xyz',
+        connectedBy: 'user-001',
+      });
+
+      /* Default to zero selected pages */
+      expect(await service.getSelectedPages('notion')).toEqual([]);
+
+      /* Save selected page IDs */
+      const savedPages = await service.saveSelectedPages('notion', ['page-1', 'page-2', 'page-1']);
+      expect(savedPages).toEqual(['page-1', 'page-2']);
+      expect(await service.getSelectedPages('notion')).toEqual(['page-1', 'page-2']);
+
+      /* Can clear all selected pages (0 selected) while remaining connected */
+      await service.saveSelectedPages('notion', []);
+      expect(await service.getSelectedPages('notion')).toEqual([]);
+
+      const conn = await service.getConnection('notion');
+      expect(conn?.status).toBe('connected');
     });
   });
 });

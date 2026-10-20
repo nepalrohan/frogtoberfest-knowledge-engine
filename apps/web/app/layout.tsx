@@ -15,7 +15,7 @@ const geistMono = localFont({
   variable: "--font-geist-mono",
 });
 
-import { TooltipProvider } from "@repo/ui";
+import { TooltipProvider, Toaster } from "@repo/ui";
 import { AppSidebar } from "./components/app-sidebar";
 
 export const metadata: Metadata = {
@@ -38,6 +38,7 @@ export default function RootLayout({
               {children}
             </main>
           </div>
+          <Toaster position="top-right" />
         </TooltipProvider>
       </body>
     </html>
