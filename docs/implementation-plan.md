@@ -57,31 +57,11 @@ export interface IVectorStore {
 // ==========================================
 // 3. CONVERSATION & CHAT API CONTRACT
 // ==========================================
-export interface ChatRequestDTO {
-  conversationId?: string;
-  message: string;
-  userId?: string;
-}
-
-export interface CitationItem {
-  sourceIndex: number;
-  documentId: string;
-  title: string;
-  sourceUrl: string;
-  snippet: string;
-}
-
-export interface ChatResponseDTO {
-  conversationId: string;
-  messageId: string;
-  role: 'assistant';
-  content: string;
-  citations: CitationItem[];
-  metadata: {
-    model: string;
-    latencyMs: number;
-    chunksRetrieved: number;
-  };
+// Source of truth: packages/api-client/src/modules/chat.ts (ChatApi, ChatMessage,
+// ChatSource, RunDetails, ChatStreamEvent). POST /api/v1/chat[/:id] streams
+// ChatStreamEvent values over SSE; see docs/retrieval-and-citations.md.
+export interface SendMessagePayload {
+  message: string; // 1-2000 characters
 }
 ```
 

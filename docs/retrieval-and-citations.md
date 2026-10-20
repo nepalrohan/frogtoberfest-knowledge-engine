@@ -34,6 +34,8 @@ Standard fixed-character chunkers destroy table structures and orphan code block
 
 ## 🔍 Hybrid Retrieval Architecture
 
+> **As implemented** (`apps/backend/src/modules/indexing/retrieval/vector-store.service.ts`): only chunks whose document is not deleted, is `indexed`, matches the chunk's `document_version`, and whose `embedding_model` equals the active model are searched. The keyword side ORs the question's stemmed lexemes against the stored `search_vector` (an AND query rarely matches natural questions). The relevance gate passes when the best cosine similarity reaches `RETRIEVAL_MIN_SIMILARITY` (default 0.65) **or** a chunk contains at least `RETRIEVAL_MIN_KEYWORD_COVERAGE` (default 0.8) of the question's stemmed terms, so exact identifiers such as `ERR_4521` are not refused for a weak vector match. When `RERANKER_URL` points at a Text Embeddings Inference cross-encoder, the fused candidates are reordered by it before selection (a reranker failure keeps the fused order). Context selection (≤ 5 sources, ≤ 2 per document, token budget) runs last. The SQL below is the original sketch.
+
 To achieve high recall across conceptual questions and keyword lookups, KE implements **Hybrid Search**:
 
 ```mermaid
@@ -150,6 +152,9 @@ export async function searchHybrid(
 Local 7B models have finite effective context (4k - 8k tokens). To maintain quality:
 - Fetch only the **last 6 messages** (3 user-assistant turns) for the active `conversation_id`.
 - Do **not** rely on LLM memory to recall knowledge. Every user turn executes a fresh retrieval query against the PostgreSQL vector store.
+- **As implemented**: the whole prompt is measured against `LLM_NUM_CTX − LLM_ANSWER_RESERVE_TOKENS` before generation. Ollama silently drops the *start* of an overlong prompt (the grounding rules), so the backend trims instead: oldest history first, then the lowest-ranked sources, then the tail of the last source. Trimming is logged (`chat.prompt.trimmed`) and shown in the run details.
+- Follow-ups are rewritten into a standalone search query only when they lean on earlier turns (short, or containing words such as "it", "that", "what about").
+- A first question identical to an earlier one (ignoring case and punctuation, same models) reuses the stored answer for `CHAT_ANSWER_CACHE_TTL_SECONDS` while every cited document is still at the cited version.
 
 ```typescript
 import { DataSource } from 'typeorm';
@@ -176,39 +181,29 @@ export async function getRecentConversationHistory(
 
 ### 2. Conversation API Contracts
 
-#### `POST /api/v1/chat`
-**Request**:
-```json
-{
-  "conversationId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-  "message": "Where are the Docker compose files located?",
-  "userId": "usr_dev_1"
-}
+The wire contract lives in `packages/api-client/src/modules/chat.ts`; the backend implements it in `apps/backend/src/modules/conversation/`.
+
+| Endpoint | Response |
+| :--- | :--- |
+| `GET /api/v1/chat` | Conversations, newest activity first: `id`, `title`, `lastMessagePreview`, `messageCount`, `updatedAt` |
+| `GET /api/v1/chat/:id` | Full history; assistant messages carry `outcome`, `refusalReason`, `sources[]` (all context sources, each with `cited`), `run` (trace id, models, tokens, stage timings) and `status: "stopped"` when interrupted |
+| `DELETE /api/v1/chat/:id` | `204` |
+| `POST /api/v1/chat` / `POST /api/v1/chat/:id` | `{ "message": string }` (1–2000 chars) → **server-sent event stream** |
+
+Answers stream as SSE (`text/event-stream`, one JSON object per `data:` line), in this order:
+
+```
+meta     { conversationId, userMessageId, assistantMessageId, traceId, conversationTitle }
+stage*   { stage: rewrite|embed|retrieve|select|generate|verify, status: started|completed, durationMs? }
+sources  { sources: ChatSource[] }            -- omitted when refusing for lack of evidence
+token*   { delta }
+done     { outcome, refusalReason?, content, citedIndexes, run }   -- or --
+error    { code, message, retryable }         -- e.g. LLM_UNAVAILABLE
 ```
 
-**Response (200 OK)**:
-```json
-{
-  "conversationId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-  "messageId": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
-  "role": "assistant",
-  "content": "The Docker compose configuration files are located in the repository root under `docker-compose.yaml` [Source 1].",
-  "citations": [
-    {
-      "sourceIndex": 1,
-      "documentId": "4a1c5d9e-1111-2222-3333-444455556666",
-      "title": "Local Environment Setup",
-      "sourceUrl": "https://notion.so/org/Local-Setup-12345",
-      "snippet": "The Docker compose configuration files are located in the repository root..."
-    }
-  ],
-  "metadata": {
-    "model": "qwen2.5:7b-instruct",
-    "latencyMs": 840,
-    "chunksRetrieved": 5
-  }
-}
-```
+`done.content` is the stored text and replaces the streamed tokens (for example when an unverifiable draft becomes a refusal). Validation errors (400), unknown conversations (404) and rate limiting (429, 20 questions/min per client) are returned as plain HTTP errors before any stream opens. Closing the request cancels generation and stores the partial answer as `stopped`.
+
+Follow-up questions are rewritten into a standalone search query (`rewrite` stage, falls back to the original after `LLM_REWRITE_TIMEOUT_MS`); the answer prompt always uses the user's original wording.
 
 ---
 
@@ -254,3 +249,8 @@ flowchart TD
 1. **Empty Search Result**: No chunks returned above similarity threshold `0.65`.
 2. **Explicit LLM Refusal**: LLM completion contains phrase matching *"insufficient information"* or *"not mentioned in the context"*.
 3. **Database Write Precondition**: The response is **never** sent to the client unless the database commit to `conversation_message` succeeds.
+
+### As implemented: claim support and early refusal
+- **Claim support**: each `[Source N]` must sit in a sentence (or list item) that shares at least one content word (prefix-matched) with source N's title, headings or text. Citations with no overlap are removed and counted in `run.unsupportedCitations`; if none remain, the answer is refused as `unverifiable_citations`. This is a cheap lexical check, not proof of entailment.
+- **First-sentence gate**: streamed tokens are held until the first sentence ends; a first sentence declaring insufficient evidence is never shown as a half-answer.
+- **Refusal explanation**: an insufficient-evidence refusal names the closest documents checked, so the user can rephrase or ingest the missing topic.
