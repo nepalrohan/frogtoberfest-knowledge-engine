@@ -563,3 +563,141 @@ export class ConversationMessage {
 - Enables ticket-aware context filtering without schema changes.
 
 See [[jobs-and-reliability]] for outbox publishing logic and worker lifecycle.
+
+---
+
+## 🔌 Connector Persistence Data Model
+
+The `ConnectorPersistenceModule` provides durable, multi-provider connection storage, authenticated credential encryption, and single-use OAuth state tokens.
+
+### 1. `ConnectorConnectionEntity` (`connector_connection`)
+Tracks durable connection metadata, lifecycle status, and workspace details.
+
+```typescript
+@Entity('connector_connection')
+@Index('idx_uq_active_connector', ['provider'], {
+  unique: true,
+  where: "status IN ('CONNECTED', 'REAUTH_REQUIRED')",
+})
+export class ConnectorConnectionEntity {
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
+
+  @Column({ type: 'varchar', length: 64 })
+  @Index('idx_connector_provider')
+  provider!: string; // 'notion', 'confluence', etc.
+
+  @Column({
+    type: 'varchar',
+    length: 32,
+    default: ConnectorConnectionStatus.CONNECTED,
+  })
+  status!: ConnectorConnectionStatus; // 'CONNECTED' | 'REAUTH_REQUIRED' | 'DISCONNECTED'
+
+  @Column({ name: 'external_account_id', type: 'varchar', length: 255 })
+  externalAccountId!: string; // e.g. Notion workspace_id
+
+  @Column({ name: 'external_account_name', type: 'varchar', length: 255, nullable: true })
+  externalAccountName?: string;
+
+  @Column({ name: 'connected_by_user_id', type: 'varchar', length: 128, default: 'admin-user' })
+  connectedByUserId!: string;
+
+  @Column({
+    name: 'auth_type',
+    type: 'varchar',
+    length: 32,
+    default: ConnectorAuthType.OAUTH2,
+  })
+  authType!: ConnectorAuthType;
+
+  @Column({ name: 'connected_at', type: 'timestamptz' })
+  connectedAt!: Date;
+
+  @Column({ name: 'last_verified_at', type: 'timestamptz', nullable: true })
+  lastVerifiedAt?: Date;
+
+  @Column({ name: 'disconnected_at', type: 'timestamptz', nullable: true })
+  disconnectedAt?: Date;
+
+  @Column({ type: 'jsonb', nullable: true })
+  metadata?: Record<string, any>; // e.g. { selectedPageIds: string[], workspaceIcon: string }
+
+  @OneToOne(() => ConnectorCredentialEntity, (cred) => cred.connection, {
+    cascade: ['insert', 'update', 'remove'],
+  })
+  credential?: ConnectorCredentialEntity;
+}
+```
+
+### 2. `ConnectorCredentialEntity` (`connector_credential`)
+Stores encrypted authentication secrets in 1-to-1 relationship with the connection record.
+
+```typescript
+@Entity('connector_credential')
+export class ConnectorCredentialEntity {
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
+
+  @Column({ name: 'connection_id', type: 'uuid' })
+  @Index('idx_uq_connector_credential_conn', { unique: true })
+  connectionId!: string;
+
+  @OneToOne(() => ConnectorConnectionEntity, (conn) => conn.credential, {
+    onDelete: 'CASCADE',
+  })
+  @JoinColumn({ name: 'connection_id' })
+  connection!: ConnectorConnectionEntity;
+
+  @Column({ name: 'encrypted_payload', type: 'text' })
+  encryptedPayload!: string; // AES-256-GCM format: iv.tag.ciphertext (hex)
+
+  @Column({ name: 'encryption_key_version', type: 'int', default: 1 })
+  encryptionKeyVersion!: number;
+
+  @Column({ name: 'expires_at', type: 'timestamptz', nullable: true })
+  expiresAt?: Date;
+
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
+  createdAt!: Date;
+
+  @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })
+  updatedAt!: Date;
+}
+```
+
+### 3. `OAuthStateEntity` (`oauth_state`)
+Provides durable anti-CSRF OAuth verification across application restarts with atomic single-use consumption.
+
+```typescript
+@Entity('oauth_state')
+export class OAuthStateEntity {
+  @PrimaryColumn({ type: 'varchar', length: 64 })
+  state!: string; // 32-byte cryptographic hex token
+
+  @Column({ type: 'varchar', length: 64 })
+  provider!: string;
+
+  @Column({ name: 'user_id', type: 'varchar', length: 128, default: 'admin-user' })
+  userId!: string;
+
+  @Column({ name: 'expires_at', type: 'timestamptz' })
+  @Index('idx_oauth_state_expires')
+  expiresAt!: Date;
+
+  @Column({ name: 'consumed_at', type: 'timestamptz', nullable: true })
+  consumedAt?: Date;
+
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
+  createdAt!: Date;
+}
+```
+
+### 🔄 Multi-Connector Concurrency & State Invariants
+- **Multi-Connector Support**: Multiple different providers (`notion`, `confluence`, `jira`) can be connected concurrently.
+- **Single Active Connection per Provider**: The partial index `idx_uq_active_connector` guarantees that at most one active connection (`CONNECTED` or `REAUTH_REQUIRED`) exists per provider at any time.
+- **Lifecycle States**:
+  - `CONNECTED`: Valid credentials, verified communication.
+  - `REAUTH_REQUIRED`: Provider explicitly returned HTTP 401 Unauthorized or revoked token. Metadata is preserved for seamless reconnection.
+  - `DISCONNECTED`: User or admin explicitly severed the connection; credentials purged.
+

@@ -6,12 +6,34 @@ export interface AppConfiguration {
   nodeEnv: string;
   corsOrigin: string;
   webUrl: string;
+  frontendUrl: string;
+  encryptionSecret: string;
+  adminApiKey: string;
   appVersion: string;
   otel: {
     serviceName: string;
     serviceVersion: string;
     exporterEndpoint: string;
     samplingRatio: number;
+  };
+  notion: {
+    apiKey: string;
+    apiVersion: string;
+    baseUrl: string;
+    maxDepth: number;
+    maxRequests: number;
+    clientId: string;
+    clientSecret: string;
+    redirectUri: string;
+    authorizationUrl: string;
+  };
+  database: {
+    host: string;
+    port: number;
+    username: string;
+    password: string;
+    database: string;
+    url?: string;
   };
 }
 
@@ -21,12 +43,40 @@ export const loadConfiguration = (): AppConfiguration => ({
   nodeEnv: process.env.NODE_ENV || 'development',
   corsOrigin: process.env.CORS_ORIGIN || '*',
   webUrl: process.env.WEB_URL || 'http://localhost:3000',
+  frontendUrl: process.env.FRONTEND_URL || process.env.WEB_URL || 'http://localhost:3000',
+  encryptionSecret:
+    process.env.ENCRYPTION_SECRET || 'knowledge-engine-secret-key-32b-min!',
+  adminApiKey: process.env.ADMIN_API_KEY || 'default-admin-api-key-for-dev',
   appVersion: process.env.APP_VERSION || '1.0.0',
+  database: {
+    host: process.env.POSTGRES_HOST || 'localhost',
+    port: parseInt(process.env.POSTGRES_PORT || '5432', 10),
+    username: process.env.POSTGRES_USER || 'postgres',
+    password: process.env.POSTGRES_PASSWORD || 'postgrespassword',
+    database: process.env.POSTGRES_DB || 'frogtoberfest',
+    url: process.env.DATABASE_URL,
+  },
   otel: {
     serviceName: process.env.OTEL_ATTR_SERVICE_NAME || 'Knowledge_Engine',
     serviceVersion: process.env.OTEL_ATTR_SERVICE_VERSION || '1.0',
     exporterEndpoint: process.env.OTEL_EXPORTER_OTLP_ENDPOINT || 'http://localhost:4317',
     samplingRatio: parseFloat(process.env.OTEL_SAMPLING_RATIO || '1.0'),
+  },
+  notion: {
+    apiKey: process.env.NOTION_API_KEY || '',
+    apiVersion: process.env.NOTION_VERSION || '2022-06-28',
+    baseUrl: process.env.NOTION_BASE_URL || 'https://api.notion.com/v1',
+    maxDepth: parseInt(process.env.NOTION_MAX_DEPTH || '5', 10),
+    maxRequests: parseInt(process.env.NOTION_MAX_REQUESTS || '50', 10),
+    clientId: process.env.NOTION_CLIENT_ID || 'notion-client-id-default',
+    clientSecret:
+      process.env.NOTION_CLIENT_SECRET || 'notion-client-secret-default',
+    redirectUri:
+      process.env.NOTION_REDIRECT_URI ||
+      'http://localhost:5000/api/v1/integrations/notion/oauth/callback',
+    authorizationUrl:
+      process.env.NOTION_AUTH_URL ||
+      'https://api.notion.com/v1/oauth/authorize',
   },
 });
 
@@ -66,6 +116,34 @@ export class AppConfigService {
     );
   }
 
+  get frontendUrl(): string {
+    return (
+      this.configService.get<string>('app.frontendUrl') ??
+      this.configService.get<string>('frontendUrl') ??
+      this.webUrl
+    );
+  }
+
+  get encryptionSecret(): string {
+    return (
+      this.configService.get<string>('app.encryptionSecret') ??
+      this.configService.get<string>(
+        'encryptionSecret',
+        'knowledge-engine-secret-key-32b-min!',
+      )
+    );
+  }
+
+  get adminApiKey(): string {
+    return (
+      this.configService.get<string>('app.adminApiKey') ??
+      this.configService.get<string>(
+        'adminApiKey',
+        'default-admin-api-key-for-dev',
+      )
+    );
+  }
+
   get appVersion(): string {
     return (
       this.configService.get<string>('app.appVersion') ??
@@ -92,6 +170,53 @@ export class AppConfigService {
           'otel.samplingRatio',
           1.0,
         ),
+      }
+    );
+  }
+
+  get notion(): AppConfiguration['notion'] {
+    return (
+      this.configService.get<AppConfiguration['notion']>('app.notion') ?? {
+        apiKey: this.configService.get<string>('notion.apiKey', ''),
+        apiVersion: this.configService.get<string>(
+          'notion.apiVersion',
+          '2022-06-28',
+        ),
+        baseUrl: this.configService.get<string>(
+          'notion.baseUrl',
+          'https://api.notion.com/v1',
+        ),
+        maxDepth: this.configService.get<number>('notion.maxDepth', 5),
+        maxRequests: this.configService.get<number>('notion.maxRequests', 50),
+        clientId: this.configService.get<string>(
+          'notion.clientId',
+          'notion-client-id-default',
+        ),
+        clientSecret: this.configService.get<string>(
+          'notion.clientSecret',
+          'notion-client-secret-default',
+        ),
+        redirectUri: this.configService.get<string>(
+          'notion.redirectUri',
+          'http://localhost:5000/api/v1/integrations/notion/oauth/callback',
+        ),
+        authorizationUrl: this.configService.get<string>(
+          'notion.authorizationUrl',
+          'https://api.notion.com/v1/oauth/authorize',
+        ),
+      }
+    );
+  }
+
+  get database(): AppConfiguration['database'] {
+    return (
+      this.configService.get<AppConfiguration['database']>('app.database') ?? {
+        host: this.configService.get<string>('database.host', 'localhost'),
+        port: this.configService.get<number>('database.port', 5432),
+        username: this.configService.get<string>('database.username', 'postgres'),
+        password: this.configService.get<string>('database.password', 'postgrespassword'),
+        database: this.configService.get<string>('database.database', 'frogtoberfest'),
+        url: this.configService.get<string>('database.url'),
       }
     );
   }

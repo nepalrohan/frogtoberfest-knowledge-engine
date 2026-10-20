@@ -1,0 +1,185 @@
+{
+  "object": "list",
+  "results": [
+    {
+      "object": "block",
+      "id": "block-h1-001",
+      "parent": { "type": "page_id", "page_id": "96d741cb-6d65-4f76-bc3c-396599b519cf" },
+      "created_time": "2026-10-01T10:05:00.000Z",
+      "last_edited_time": "2026-10-01T10:05:00.000Z",
+      "has_children": false,
+      "archived": false,
+      "in_trash": false,
+      "type": "heading_1",
+      "heading_1": {
+        "rich_text": [
+          {
+            "type": "text",
+            "text": { "content": "Introduction & Architecture", "link": null },
+            "annotations": { "bold": false, "italic": false, "strikethrough": false, "underline": false, "code": false, "color": "default" },
+            "plain_text": "Introduction & Architecture",
+            "href": null
+          }
+        ],
+        "is_toggleable": false,
+        "color": "default"
+      }
+    },
+    {
+      "object": "block",
+      "id": "block-p-002",
+      "parent": { "type": "page_id", "page_id": "96d741cb-6d65-4f76-bc3c-396599b519cf" },
+      "created_time": "2026-10-01T10:06:00.000Z",
+      "last_edited_time": "2026-10-01T10:06:00.000Z",
+      "has_children": false,
+      "archived": false,
+      "in_trash": false,
+      "type": "paragraph",
+      "paragraph": {
+        "rich_text": [
+          {
+            "type": "text",
+            "text": { "content": "Welcome to the knowledge engine. Read the ", "link": null },
+            "annotations": { "bold": false, "italic": false, "strikethrough": false, "underline": false, "code": false, "color": "default" },
+            "plain_text": "Welcome to the knowledge engine. Read the ",
+            "href": null
+          },
+          {
+            "type": "text",
+            "text": { "content": "architecture docs", "link": { "url": "https://github.com/my-project/docs" } },
+            "annotations": { "bold": true, "italic": false, "strikethrough": false, "underline": false, "code": false, "color": "default" },
+            "plain_text": "architecture docs",
+            "href": "https://github.com/my-project/docs"
+          },
+          {
+            "type": "text",
+            "text": { "content": " for more details.", "link": null },
+            "annotations": { "bold": false, "italic": false, "strikethrough": false, "underline": false, "code": false, "color": "default" },
+            "plain_text": " for more details.",
+            "href": null
+          }
+        ],
+        "color": "default"
+      }
+    },
+    {
+      "object": "block",
+      "id": "block-h2-003",
+      "parent": { "type": "page_id", "page_id": "96d741cb-6d65-4f76-bc3c-396599b519cf" },
+      "created_time": "2026-10-01T10:07:00.000Z",
+      "last_edited_time": "2026-10-01T10:07:00.000Z",
+      "has_children": false,
+      "archived": false,
+      "in_trash": false,
+      "type": "heading_2",
+      "heading_2": {
+        "rich_text": [
+          {
+            "type": "text",
+            "text": { "content": "Core Principles", "link": null },
+            "annotations": { "bold": false, "italic": false, "strikethrough": false, "underline": false, "code": false, "color": "default" },
+            "plain_text": "Core Principles",
+            "href": null
+          }
+        ],
+        "is_toggleable": false,
+        "color": "default"
+      }
+    },
+    {
+      "object": "block",
+      "id": "block-bullet-004",
+      "parent": { "type": "page_id", "page_id": "96d741cb-6d65-4f76-bc3c-396599b519cf" },
+      "created_time": "2026-10-01T10:08:00.000Z",
+      "last_edited_time": "2026-10-01T10:08:00.000Z",
+      "has_children": false,
+      "archived": false,
+      "in_trash": false,
+      "type": "bulleted_list_item",
+      "bulleted_list_item": {
+        "rich_text": [
+          {
+            "type": "text",
+            "text": { "content": "Quality over quantity", "link": null },
+            "annotations": { "bold": false, "italic": false, "strikethrough": false, "underline": false, "code": false, "color": "default" },
+            "plain_text": "Quality over quantity",
+            "href": null
+          }
+        ],
+        "color": "default"
+      }
+    },
+    {
+      "object": "block",
+      "id": "block-num-005",
+      "parent": { "type": "page_id", "page_id": "96d741cb-6d65-4f76-bc3c-396599b519cf" },
+      "created_time": "2026-10-01T10:09:00.000Z",
+      "last_edited_time": "2026-10-01T10:09:00.000Z",
+      "has_children": false,
+      "archived": false,
+      "in_trash": false,
+      "type": "numbered_list_item",
+      "numbered_list_item": {
+        "rich_text": [
+          {
+            "type": "text",
+            "text": { "content": "Step 1: Clone repo", "link": null },
+            "annotations": { "bold": false, "italic": false, "strikethrough": false, "underline": false, "code": false, "color": "default" },
+            "plain_text": "Step 1: Clone repo",
+            "href": null
+          }
+        ],
+        "color": "default"
+      }
+    },
+    {
+      "object": "block",
+      "id": "block-todo-006",
+      "parent": { "type": "page_id", "page_id": "96d741cb-6d65-4f76-bc3c-396599b519cf" },
+      "created_time": "2026-10-01T10:10:00.000Z",
+      "last_edited_time": "2026-10-01T10:10:00.000Z",
+      "has_children": false,
+      "archived": false,
+      "in_trash": false,
+      "type": "to_do",
+      "to_do": {
+        "rich_text": [
+          {
+            "type": "text",
+            "text": { "content": "Verify local database connection", "link": null },
+            "annotations": { "bold": false, "italic": false, "strikethrough": false, "underline": false, "code": false, "color": "default" },
+            "plain_text": "Verify local database connection",
+            "href": null
+          }
+        ],
+        "checked": true,
+        "color": "default"
+      }
+    },
+    {
+      "object": "block",
+      "id": "block-toggle-007",
+      "parent": { "type": "page_id", "page_id": "96d741cb-6d65-4f76-bc3c-396599b519cf" },
+      "created_time": "2026-10-01T10:11:00.000Z",
+      "last_edited_time": "2026-10-01T10:11:00.000Z",
+      "has_children": true,
+      "archived": false,
+      "in_trash": false,
+      "type": "toggle",
+      "toggle": {
+        "rich_text": [
+          {
+            "type": "text",
+            "text": { "content": "Advanced Configuration", "link": null },
+            "annotations": { "bold": false, "italic": false, "strikethrough": false, "underline": false, "code": false, "color": "default" },
+            "plain_text": "Advanced Configuration",
+            "href": null
+          }
+        ],
+        "color": "default"
+      }
+    }
+  ],
+  "next_cursor": "cursor-page-2-token",
+  "has_more": true
+}
