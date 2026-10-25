@@ -105,7 +105,7 @@ AI is part of the core data path, not just a chat front end:
 | `modules/conversation/generation/first-sentence-gate.ts` | `FirstSentenceGate.push()` | Holds back the first sentence and suppresses the stream if the model is refusing. |
 | `modules/conversation/generation/citation-verifier.ts` | `verifyCitations()` | Parses `[Source N]` markers, drops citations to unknown or unsupported sources, and decides `answered` vs `refused`. |
 
-**AI-assisted development:** this codebase was written with AI coding assistants (Claude Code, following the specs in [`openspec/`](openspec/) and the rules in [`AGENTS.md`](AGENTS.md)). Every file in `apps/` and `packages/` should be treated as AI-assisted and human-reviewed.
+**AI-assisted development:** AI coding assistants were used throughout this entire repository, for every app, package, migration, test, config file, doc and spec. The work was guided by the specs in [`openspec/`](openspec/) and the rules in [`AGENTS.md`](AGENTS.md), and reviewed by the team.
 
 ## Limitations
 
