@@ -2,10 +2,6 @@
 export const INSUFFICIENT_EVIDENCE_TEXT =
   'I do not have sufficient information in the indexed documentation to answer this question.';
 
-/* Shown instead of an answer whose citations do not point at any provided source */
-export const UNVERIFIABLE_CITATIONS_TEXT =
-  "I drafted an answer but couldn't verify its citations against the retrieved documents, so I'm not showing it.";
-
 /* Refusal shown to the user: the fixed sentence plus what was checked, so they can rephrase or ingest the topic */
 export function explainInsufficientEvidence(checkedTitles: string[]): string {
   if (checkedTitles.length === 0) {

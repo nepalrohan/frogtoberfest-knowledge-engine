@@ -72,6 +72,8 @@ export interface RunDetails {
   sourcesDropped?: number;
   /* Citations removed because their sentence shared no words with the cited source */
   unsupportedCitations?: number;
+  /* Answer shown although none of its citations could be verified */
+  citationsUnverified?: boolean;
 }
 
 

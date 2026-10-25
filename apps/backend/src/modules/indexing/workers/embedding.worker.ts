@@ -12,6 +12,7 @@ import { StructuredLogger } from '../../../common/logger/structured-logger';
 import { LogEvents } from '../../../common/logger/log-events';
 import { TraceContextPropagator } from '../../../common/telemetry/trace-context.propagator';
 import { ErrorClassifier } from '../../../common/resilience/error-classifier';
+import { withChunkHeading } from '../chunker/chunk-heading';
 
 /* BullMQ worker processing document chunking and atomic vector upsert */
 @Processor(EMBEDDING_QUEUE_NAME)
@@ -123,7 +124,10 @@ export class EmbeddingWorker implements OnModuleInit, OnModuleDestroy {
       }
 
       /* 5. Generate vector embeddings via configured provider */
-      const chunkTexts = chunks.map((c) => c.content);
+      /* The vector carries the heading path; the stored content stays the plain passage shown to users */
+      const chunkTexts = chunks.map((c) =>
+        withChunkHeading(currentDoc.title, c.metadata.sectionHeaders ?? [], c.content),
+      );
       const vectors = await this.embeddingProvider.embed(chunkTexts, 'document');
       const embeddingModel = this.embeddingProvider.getModelName();
 

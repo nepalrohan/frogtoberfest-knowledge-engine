@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { AlertCircle, BookOpen, Check, Copy, FileSearch, RotateCcw, SearchX, ShieldAlert, Square } from "lucide-react";
+import { AlertCircle, BookOpen, Check, Copy, FileSearch, RotateCcw, SearchX, ShieldAlert, Square, TriangleAlert } from "lucide-react";
 import type { PipelineStage, RefusalReason } from "@repo/api-client";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@repo/ui/components/alert";
 import { Button } from "@repo/ui/components/button";
@@ -100,6 +100,21 @@ function AssistantMessage({ message, onInspect, onRetry }: MessageItemProps) {
       ) : (
         message.content && (
           <div>
+            {!isStreaming && message.run?.citationsUnverified && (
+              <Alert className="mb-3 border-amber-500/30 bg-amber-500/5 text-amber-700 dark:text-amber-400">
+                <TriangleAlert />
+                <AlertTitle>Citations can&apos;t be verified</AlertTitle>
+                <AlertDescription>
+                  This answer could not be matched to the retrieved sources. Check the sources before relying on it.
+                </AlertDescription>
+              </Alert>
+            )}
+            {!isStreaming && !message.run?.citationsUnverified && Boolean(message.run?.unsupportedCitations) && (
+              <p className="mb-2 flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-400">
+                <TriangleAlert className="size-3.5" />
+                Some citations couldn&apos;t be verified and were removed.
+              </p>
+            )}
             <AnswerText
               text={message.content}
               sources={message.sources}

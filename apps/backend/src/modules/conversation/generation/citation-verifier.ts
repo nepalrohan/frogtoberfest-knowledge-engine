@@ -1,8 +1,5 @@
 import type { AnswerOutcome, ChatSource, RefusalReason } from '../chat.types';
-import {
-  INSUFFICIENT_EVIDENCE_TEXT,
-  UNVERIFIABLE_CITATIONS_TEXT,
-} from './answer-text';
+import { INSUFFICIENT_EVIDENCE_TEXT } from './answer-text';
 
 export interface VerifiedAnswer {
   outcome: AnswerOutcome;
@@ -12,6 +9,8 @@ export interface VerifiedAnswer {
   sources: ChatSource[];
   /* Citations removed because their sentence shares no content words with the cited source */
   unsupportedCitations: number;
+  /* Answer shown although none of its citations could be verified; the UI warns instead of refusing */
+  citationsUnverified?: boolean;
 }
 
 const CITATION = /\s?\[Source (\d+)\]/g;
@@ -121,13 +120,14 @@ export function verifyCitations(
     })
     .trim();
 
+  /* Retrieval already passed the relevance gate, so an uncited draft is still shown, flagged for a warning */
   if (cited.size === 0) {
     return {
-      outcome: 'refused',
-      refusalReason: 'unverifiable_citations',
-      content: UNVERIFIABLE_CITATIONS_TEXT,
+      outcome: 'answered',
+      content,
       sources,
       unsupportedCitations: supported.removed,
+      citationsUnverified: true,
     };
   }
   return {

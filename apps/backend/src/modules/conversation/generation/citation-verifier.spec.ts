@@ -1,8 +1,5 @@
 import { verifyCitations } from './citation-verifier';
-import {
-  INSUFFICIENT_EVIDENCE_TEXT,
-  UNVERIFIABLE_CITATIONS_TEXT,
-} from './answer-text';
+import { INSUFFICIENT_EVIDENCE_TEXT } from './answer-text';
 import type { ChatSource } from '../chat.types';
 
 const source = (index: number): ChatSource => ({
@@ -39,18 +36,18 @@ describe('verifyCitations', () => {
     });
   });
 
-  it('refuses as unverifiable when the answer cites no provided source', () => {
+  it('keeps the answer but flags it when it cites no provided source', () => {
     const result = verifyCitations(
       'Just redeploy the previous tag [Source 9].',
       sources,
     );
 
     expect(result).toEqual({
-      outcome: 'refused',
-      refusalReason: 'unverifiable_citations',
-      content: UNVERIFIABLE_CITATIONS_TEXT,
+      outcome: 'answered',
+      content: 'Just redeploy the previous tag.',
       sources,
       unsupportedCitations: 0,
+      citationsUnverified: true,
     });
   });
 
@@ -94,12 +91,12 @@ describe('verifyCitations', () => {
     },
   );
 
-  it('still refuses when a variant names no provided source', () => {
+  it('flags the answer as unverified when a variant names no provided source', () => {
     expect(
       verifyCitations('Roll back [Source Document 8].', sources),
     ).toMatchObject({
-      outcome: 'refused',
-      refusalReason: 'unverifiable_citations',
+      outcome: 'answered',
+      citationsUnverified: true,
     });
   });
 
@@ -138,13 +135,14 @@ describe('verifyCitations', () => {
       expect(result.sources.every((s) => s.cited)).toBe(true);
     });
 
-    it('refuses as unverifiable when every citation is unsupported', () => {
+    it('flags the answer as unverified when every citation is unsupported', () => {
       expect(
         verifyCitations('Kubernetes autoscaling handles load [Source 2].', [billing]),
       ).toMatchObject({
-        outcome: 'refused',
-        refusalReason: 'unverifiable_citations',
+        outcome: 'answered',
+        content: 'Kubernetes autoscaling handles load.',
         unsupportedCitations: 1,
+        citationsUnverified: true,
       });
     });
 
