@@ -1,159 +1,135 @@
-# Turborepo starter
+# Knowledge Engine
 
-This Turborepo starter is maintained by the Turborepo core team.
+An internal knowledge assistant that syncs content from your workspace tools through pluggable **connectors** (Notion today, more planned), plus direct uploads. It indexes everything locally and answers questions with **verifiable `[Source N]` citations**, or refuses when the evidence is not there. Everything runs on your own machine: local LLM and embeddings through Ollama, with no cloud AI calls.
 
-## Using this example
+## Problem & Value
 
-Run the following command:
+Team knowledge is scattered across tools like Notion and Confluence that nobody can search together, and generic chatbots make up answers. Knowledge Engine:
 
-```sh
-npx create-turbo@latest
+- **Brings sources together.** Every connector feeds the same canonical document store, so one question searches them all.
+- **Keeps knowledge current.** Selected resources sync in the background, and unchanged ones are skipped.
+- **Answers only from your documents.** Every claim must cite a retrieved source, and unsupported answers are refused.
+- **Keeps data private.** Documents, vectors and the model all stay local.
+
+## Demo
+
+- **Video:** _add link_
+- **Workflow:** connect a source (e.g. Notion) → select resources → they sync and are indexed → ask in chat → get a cited answer, or a clear refusal.
+
+## Architecture
+
+![Architecture: connector sync, indexing and grounded chat](docs/assets/architecture.png)
+
+<sub>Diagram source: [`docs/assets/architecture.mmd`](docs/assets/architecture.mmd). Re-render with `npx -p @mermaid-js/mermaid-cli mmdc -i docs/assets/architecture.mmd -o docs/assets/architecture.png -s 2 -b white`.</sub>
+
+- **Durable by design.** Every write saves its domain row and its outbox row in one ACID transaction. Relays drain outboxes with `FOR UPDATE SKIP LOCKED`, and deterministic job ids (`sync:<connection>:<resource>`, `embed:<doc>:<version>`) prevent duplicate jobs.
+- **Change detection.** A cheap check of the provider's revision timestamp runs first (e.g. Notion `last_edited_time`), then a SHA-256 hash of the canonical Markdown. Only real changes create a new document version.
+- **Safe versioning.** Versions only go up. Stale or deselected results are rejected under a row lock, and the embedding worker skips outdated versions.
+- **Grounded chat.** Hybrid search (pgvector cosine + Postgres full-text) feeds a relevance gate and an optional cross-encoder reranker. The answer is then checked citation by citation.
+
+More detail is in [`docs/`](docs/): [architecture](docs/architecture.md), [ingestion & sync](docs/ingestion-and-sync.md), [retrieval & citations](docs/retrieval-and-citations.md), [jobs & reliability](docs/jobs-and-reliability.md), [security](docs/security.md).
+
+## Connectors
+
+The sync pipeline doesn't depend on any one provider. A connector only supplies the provider-specific parts. Outbox, queueing, change detection, versioning, dead-lettering and indexing are shared.
+
+| Source | Status | Type |
+| --- | --- | --- |
+| Notion | ✅ Implemented | OAuth connector, pages synced as resources |
+| File upload / text feed | ✅ Implemented | Direct ingestion (`/api/v1/upload`, `/api/v1/feed-knowledge`) |
+| Confluence | 🗺️ Planned | Connector (provider type already reserved) |
+
+**Adding a connector** (`apps/backend/src/modules/`):
+
+1. **Client:** API access and auth (e.g. `ingestion/connectors/notion/notion.client.ts`). Credentials are stored per provider, encrypted with AES-256-GCM, by `connector-persistence`.
+2. **Parser:** converts provider content into the canonical Markdown AST (`ingestion/normalizers/<provider>/`). `CanonicalDocumentNormalizer` then produces the content hash.
+3. **Sync processor:** implements `KnowledgeSyncProcessor.syncResource()` (`ingestion/interfaces/knowledge-sync-processor.interface.ts`) and returns `NO_OP`, `UPDATED` or `FAILED`.
+4. **Register it:** add it to the `KNOWLEDGE_SYNC_PROCESSORS` provider in `ingestion/ingestion.module.ts`, and add its name to `SYNC_PROVIDERS` (`queue/queue.constants.ts`).
+5. **Integration routes:** OAuth/connect, resource listing and selection (see `integrations/integrations.controller.ts` for Notion).
+
+## Technology
+
+| Layer | Choice |
+| --- | --- |
+| Backend | NestJS 12, TypeScript, TypeORM |
+| Data | PostgreSQL 16 + `pgvector` (HNSW cosine index, `tsvector` full-text) |
+| Jobs | Redis 7 + BullMQ, transactional outbox, dead-letter queue |
+| AI | Ollama: `nomic-embed-text` (768-dim embeddings), `qwen2.5:7b-instruct` (generation); optional TEI cross-encoder reranker |
+| Frontend | Next.js (App Router), shadcn/ui, Tailwind |
+| Ops | Docker Compose, OpenTelemetry → Jaeger, structured JSON logs |
+| Repo | pnpm + Turborepo monorepo |
+
+## Getting Started
+
+**Prerequisites:** Node ≥ 24, pnpm, Docker.
+
+```bash
+pnpm install
+cp apps/backend/.env.example apps/backend/.env.development   # set PORT=5003 (macOS AirPlay uses 5000)
+
+# Postgres, Redis, Jaeger, Ollama + model pull (~5 GB the first time)
+cd apps/backend
+docker compose --env-file .env.development -f docker-compose.dev.yaml up -d postgres redis jaeger ollama ollama-init
+cd ../..
+
+pnpm dev    # web → http://localhost:3000, API → http://localhost:5003 (Swagger at /api/docs)
 ```
 
-## What's inside?
+- Migrations run automatically when the API starts.
+- Set `NEXT_PUBLIC_BACKEND_URL=http://localhost:5003` in `apps/web/.env.development`.
+- Connector setup: Notion OAuth is described in [docs/notion-oauth-setup.md](docs/notion-oauth-setup.md).
+- Tests: `pnpm --filter @my-project/backend test`. Type checks: `pnpm check-types`.
 
-This Turborepo includes the following packages/apps:
+## Built with AI
 
-### Apps and Packages
+AI is part of the core data path, not just a chat front end:
 
-- `docs`: a [Next.js](https://nextjs.org/) app
-- `web`: another [Next.js](https://nextjs.org/) app
-- `@repo/ui`: a stub React component library shared by both `web` and `docs` applications
-- `@repo/eslint-config`: `eslint` configurations (includes `@next/eslint-plugin-next` and `eslint-config-prettier`)
-- `@repo/typescript-config`: `tsconfig.json`s used throughout the monorepo
+1. An embedding model turns every document chunk into a vector that drives retrieval.
+2. The LLM rewrites follow-up questions into standalone search queries.
+3. A reranker model reorders retrieved evidence.
+4. The LLM's answer is parsed and checked programmatically before it is shown.
 
-Each package/app is 100% [TypeScript](https://www.typescriptlang.org/).
+## AI Usage Disclosure
 
-### Utilities
+**Where AI output is consumed programmatically** (all paths under `apps/backend/src/`):
 
-This Turborepo has some additional tools already setup for you:
+| File | Function | What the code does with the model output |
+| --- | --- | --- |
+| `modules/indexing/embedding/adapters/ollama-embedding.adapter.ts` | `embed()` | Calls Ollama `/api/embed` and returns raw vectors. |
+| `modules/indexing/workers/embedding.worker.ts` | `EmbeddingWorker.process()` | Checks vector count and width (768), then upserts them into `document_chunk.embedding` in one transaction. |
+| `modules/conversation/chat-turn.service.ts` | `ChatTurnService.answer()` | Embeds the question, runs the search with that vector, and routes the generated answer through the gate and verifier below. |
+| `modules/indexing/retrieval/vector-store.service.ts` | `searchHybrid()` | Ranks chunks by cosine distance to the query embedding, fused with keyword rank. |
+| `modules/conversation/generation/query-rewriter.ts` | `rewriteFollowUp()` | Uses the LLM's rewritten question as the retrieval query. |
+| `modules/conversation/rerank/tei-reranker.client.ts` | `TeiRerankerClient.rerank()` | Returns cross-encoder scores that reorder candidates before `selectContext()` (`retrieval/context-selector.ts`). |
+| `modules/conversation/llm/ollama-llm.client.ts` | `OllamaLlmClient.streamChat()` | Parses Ollama's NDJSON token stream into answer text and token counts. |
+| `modules/conversation/generation/first-sentence-gate.ts` | `FirstSentenceGate.push()` | Holds back the first sentence and suppresses the stream if the model is refusing. |
+| `modules/conversation/generation/citation-verifier.ts` | `verifyCitations()` | Parses `[Source N]` markers, drops citations to unknown or unsupported sources, and decides `answered` vs `refused`. |
 
-- [TypeScript](https://www.typescriptlang.org/) for static type checking
-- [ESLint](https://eslint.org/) for code linting
-- [Prettier](https://prettier.io) for code formatting
+**AI-assisted development:** AI coding assistants were used throughout this entire repository, for every app, package, migration, test, config file, doc and spec. The work was guided by the specs in [`openspec/`](openspec/) and the rules in [`AGENTS.md`](AGENTS.md), and reviewed by the team.
 
-### Build
+## Limitations
 
-To build all apps and packages, run the following command:
+- **No end-user authentication or authorization.** Chat and document endpoints are open. Only the integration endpoints check a single shared admin key (`AdminAuthGuard`). There are no users, roles or per-document permissions, and source permissions (e.g. who can see a Notion page) are not enforced at answer time.
+- **No sensitive-data masking.** Synced content, prompts and answers are stored and logged as-is. The PII/secret redaction in `common/logger/structured-logger.ts` is commented out, and nothing is masked before indexing or generation.
+- **One connector so far, single tenant.** Notion is the only connector implemented. Confluence is planned but not built, and each connector still has its own integration routes (`/v1/integrations/notion/*`). Sync starts when resources are selected; there are no webhooks or periodic re-sync.
+- **Local-model quality and speed.** A 7B model on CPU (Docker on macOS) is slow and can miss nuance. Answers are only as good as the retrieved chunks.
+- **Operational gaps.** There is no tool to inspect or replay the dead-letter queue, no metrics dashboard, and no production deployment of the AI services (`docker-compose.prod.yaml` covers only API and web).
 
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended):
+## Future Improvements
 
-```sh
-cd my-turborepo
-turbo build
+- SSO / OIDC login with role and source-permission-aware retrieval.
+- PII and secret detection with masking before indexing, plus redacted logs.
+- More connectors (Confluence, Google Drive, GitHub wikis), generic `/v1/integrations/:provider` routes, webhooks and scheduled re-sync.
+- Admin UI for sync status, DLQ inspection and replay.
+- Answer-quality evals in CI (`test/eval/`) and GPU or hosted inference options.
+
+## Repository Layout
+
 ```
-
-Without global `turbo`, use your package manager:
-
-```sh
-cd my-turborepo
-npx turbo build
-pnpm exec turbo build
-pnpm exec turbo build
+apps/backend   NestJS API, workers, migrations (src/modules: ingestion + connectors, indexing, conversation, connector-persistence, documents, queue)
+apps/web       Next.js UI (chat, documents, integrations)
+apps/app       Expo mobile client (early stage)
+packages/      shared api-client, ui, eslint and typescript configs
+docs/          architecture and design notes
+openspec/      specs and change proposals that drove the AI-assisted implementation
 ```
-
-You can build a specific package by using a [filter](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters):
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
-
-```sh
-turbo build --filter=docs
-```
-
-Without global `turbo`:
-
-```sh
-npx turbo build --filter=docs
-pnpm exec turbo build --filter=docs
-pnpm exec turbo build --filter=docs
-```
-
-### Develop
-
-To develop all apps and packages, run the following command:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended):
-
-```sh
-cd my-turborepo
-turbo dev
-```
-
-Without global `turbo`, use your package manager:
-
-```sh
-cd my-turborepo
-npx turbo dev
-pnpm exec turbo dev
-pnpm exec turbo dev
-```
-
-You can develop a specific package by using a [filter](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters):
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
-
-```sh
-turbo dev --filter=web
-```
-
-Without global `turbo`:
-
-```sh
-npx turbo dev --filter=web
-pnpm exec turbo dev --filter=web
-pnpm exec turbo dev --filter=web
-```
-
-### Remote Caching
-
-> [!TIP]
-> Vercel Remote Cache is free for all plans. Get started today at [vercel.com](https://vercel.com/signup?utm_source=remote-cache-sdk&utm_campaign=free_remote_cache).
-
-Turborepo can use a technique known as [Remote Caching](https://turborepo.dev/docs/core-concepts/remote-caching) to share cache artifacts across machines, enabling you to share build caches with your team and CI/CD pipelines.
-
-By default, Turborepo will cache locally. To enable Remote Caching you will need an account with Vercel. If you don't have an account you can [create one](https://vercel.com/signup?utm_source=turborepo-examples), then enter the following commands:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended):
-
-```sh
-cd my-turborepo
-turbo login
-```
-
-Without global `turbo`, use your package manager:
-
-```sh
-cd my-turborepo
-npx turbo login
-pnpm exec turbo login
-pnpm exec turbo login
-```
-
-This will authenticate the Turborepo CLI with your [Vercel account](https://vercel.com/docs/concepts/personal-accounts/overview).
-
-Next, you can link your Turborepo to your Remote Cache by running the following command from the root of your Turborepo:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
-
-```sh
-turbo link
-```
-
-Without global `turbo`:
-
-```sh
-npx turbo link
-pnpm exec turbo link
-pnpm exec turbo link
-```
-
-## Useful Links
-
-Learn more about the power of Turborepo:
-
-- [Tasks](https://turborepo.dev/docs/crafting-your-repository/running-tasks)
-- [Caching](https://turborepo.dev/docs/crafting-your-repository/caching)
-- [Remote Caching](https://turborepo.dev/docs/core-concepts/remote-caching)
-- [Filtering](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters)
-- [Configuration Options](https://turborepo.dev/docs/reference/configuration)
-- [CLI Usage](https://turborepo.dev/docs/reference/command-line-reference)

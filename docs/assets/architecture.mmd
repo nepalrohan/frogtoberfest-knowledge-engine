@@ -1,0 +1,29 @@
+flowchart TB
+  UI["Next.js web"] -->|"REST + SSE"| API["NestJS API"]
+
+  subgraph SYNC["Connector sync"]
+    direction TB
+    TX[("Sync items + sync outbox")] --> R1["Sync outbox relay"]
+    R1 --> Q1[["BullMQ: ingestion-sync"]]
+    Q1 --> W1["SyncResourceWorker"]
+    W1 -->|"dispatch by provider"| C["Connector processor"]
+    C -->|"provider API"| N["Notion / Confluence / ..."]
+    Q1 -.->|"final failures"| DLQ[["ingestion-sync-dlq"]]
+  end
+
+  subgraph INDEX["Indexing"]
+    direction TB
+    R2["Embedding outbox relay"] --> Q2[["BullMQ: embedding"]]
+    Q2 --> W2["EmbeddingWorker"]
+  end
+
+  DB[("Postgres + pgvector: documents, chunks, vectors")]
+  O["Ollama: nomic-embed-text + qwen2.5"]
+
+  API -->|"select resources"| TX
+  W1 -->|"document + embedding outbox, one transaction"| DB
+  DB --> R2
+  W2 -->|"embed chunks"| O
+  W2 -->|"chunks + vectors"| DB
+  API -->|"chat: embed, hybrid search, rerank, generate, verify"| O
+  API -->|"hybrid search"| DB
