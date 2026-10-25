@@ -6,6 +6,6 @@ export * from './connectors/notion/notion.connector';
 export * from './connectors/notion/notion-sync.processor';
 export * from './normalizers/notion/notion.parser';
 export * from './normalizers/canonical/canonical-document.normalizer';
-export * from './services/document-storage-placeholder.service';
+export * from './services/document-storage.service';
 export * from './workers/sync-resource.worker';
 export * from './ingestion.module';

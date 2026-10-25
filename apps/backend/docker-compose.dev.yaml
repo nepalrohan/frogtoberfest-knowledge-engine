@@ -60,6 +60,47 @@ services:
     networks:
       - frogtoberfest-network
 
+  # Local LLM + embedding server used by the backend (OLLAMA_URL=http://localhost:11434).
+  # On macOS Docker runs Ollama on CPU only; the native Ollama app is much faster for the chat model.
+  ollama:
+    image: ollama/ollama:0.12.6
+    container_name: frogtoberfest_ollama_dev
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    environment:
+      # Keep models resident between requests so embedding and chat do not reload on every call
+      OLLAMA_KEEP_ALIVE: ${LLM_KEEP_ALIVE:-30m}
+    volumes:
+      - frogtoberfest_ollama_models:/root/.ollama
+    healthcheck:
+      test: [ "CMD", "ollama", "list" ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - frogtoberfest-network
+
+  # One-shot job pulling the models the backend expects; already-pulled models are skipped quickly
+  ollama-init:
+    image: ollama/ollama:0.12.6
+    container_name: frogtoberfest_ollama_init_dev
+    restart: "no"
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: [ "/bin/sh", "-c" ]
+    command:
+      - >
+        ollama pull ${EMBEDDING_MODEL:-nomic-embed-text} &&
+        ollama pull ${GENERATION_MODEL:-qwen2.5:7b-instruct}
+    volumes:
+      - frogtoberfest_ollama_models:/root/.ollama
+    networks:
+      - frogtoberfest-network
+
   # Optional cross-encoder reranker for chat retrieval (set RERANKER_URL=http://localhost:8081 to use it).
   # Start with: docker compose -f docker-compose.dev.yaml --profile reranker up -d reranker
   # The small default model suits low-RAM machines; BAAI/bge-reranker-base ranks better but needs ~1 GB more.
@@ -81,6 +122,7 @@ volumes:
   frogtoberfest_pg_data:
   frogtoberfest_redis_data:
   frogtoberfest_reranker_models:
+  frogtoberfest_ollama_models:
 networks:
   frogtoberfest-network:
     driver: bridge

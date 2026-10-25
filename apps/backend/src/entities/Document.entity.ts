@@ -11,7 +11,8 @@ import { DocumentChunk } from './DocumentChunk.entity';
 
 /* Canonical document entity storing raw, normalized content, versioning, and lifecycle states */
 @Entity('document')
-@Index(['sourceType', 'sourceId'])
+/* One canonical document per source resource, shared by connector sync and direct ingestion */
+@Index('uq_document_source', ['sourceType', 'sourceId'], { unique: true })
 @Index(['contentHash'])
 export class Document {
   @PrimaryGeneratedColumn('uuid')

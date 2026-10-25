@@ -8,10 +8,16 @@ import {
   Index,
 } from 'typeorm';
 import { ConnectorConnectionEntity } from './connector-connection.entity';
+import type { SyncResourceJobPayload } from '../../queue/queue.constants';
+import type { OutboxStatus } from '../../../common/outbox/outbox.types';
 
 /* Durable entity storing transactional outbox events to guarantee reliable queue dispatch */
 @Entity('connector_sync_outbox')
 @Index('idx_connector_sync_outbox_pending', ['status', 'createdAt'])
+/* Keeps relay claims cheap: only rows that can still be published are indexed */
+@Index('idx_connector_sync_outbox_claimable', ['nextAttemptAt'], {
+  where: `"status" IN ('pending', 'publishing')`,
+})
 export class ConnectorSyncOutboxEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -30,13 +36,22 @@ export class ConnectorSyncOutboxEntity {
   eventType: string;
 
   @Column({ type: 'jsonb' })
-  payload: Record<string, any>;
+  payload: SyncResourceJobPayload;
 
   @Column({ type: 'varchar', length: 20, default: 'pending' })
-  status: 'pending' | 'published' | 'failed';
+  status: OutboxStatus;
 
   @Column({ name: 'attempt_count', type: 'integer', default: 0 })
   attemptCount: number;
+
+  @Column({ name: 'last_error', type: 'text', nullable: true })
+  lastError: string | null;
+
+  @Column({ name: 'next_attempt_at', type: 'timestamptz', nullable: true })
+  nextAttemptAt: Date | null;
+
+  @Column({ name: 'claimed_at', type: 'timestamptz', nullable: true })
+  claimedAt: Date | null;
 
   @Column({ name: 'published_at', type: 'timestamptz', nullable: true })
   publishedAt: Date | null;

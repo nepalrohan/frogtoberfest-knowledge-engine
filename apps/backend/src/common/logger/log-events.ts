@@ -15,6 +15,16 @@ export const LogEvents = {
 
   // Outbox Relay
   OUTBOX_PUBLISH_FAILED: 'outbox.publish.failed',
+  OUTBOX_PUBLISHED: 'outbox.published',
+  OUTBOX_DEAD_LETTERED: 'outbox.dead_lettered',
+
+  // Connector Sync Jobs
+  SYNC_JOB_DEAD_LETTERED: 'sync.job.dead_lettered',
+  SYNC_JOB_DLQ_WRITE_FAILED: 'sync.job.dlq_write_failed',
+
+  // Canonical Documents
+  DOCUMENT_VERSION_PUBLISHED: 'document.version.published',
+  DOCUMENT_PUBLICATION_REJECTED: 'document.publication.rejected',
 
   // Retrieval & RAG
   RETRIEVAL_COMPLETED: 'retrieval.completed',

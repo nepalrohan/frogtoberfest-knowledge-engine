@@ -12,6 +12,8 @@ import {
   ConnectorConnectionEntity,
   ConnectorCredentialEntity,
   OAuthStateEntity,
+  ConnectorSyncItemEntity,
+  ConnectorSyncOutboxEntity,
 } from '../modules/connector-persistence/entities';
 import { MIGRATIONS } from './migrations';
 
@@ -41,6 +43,8 @@ export function buildDataSourceOptions(
       ConnectorConnectionEntity,
       ConnectorCredentialEntity,
       OAuthStateEntity,
+      ConnectorSyncItemEntity,
+      ConnectorSyncOutboxEntity,
     ],
     extra: {
       max: 20,
