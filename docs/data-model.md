@@ -51,6 +51,8 @@ erDiagram
         integer document_version
         text content
         vector embedding
+        varchar embedding_model
+        tsvector search_vector
         integer token_count
         jsonb metadata
         timestamptz created_at
@@ -187,7 +189,12 @@ CREATE TABLE document_chunk (
     chunk_index INTEGER NOT NULL,
     document_version INTEGER NOT NULL,
     content TEXT NOT NULL,
-    embedding VECTOR(384),
+    -- Width must equal the embedding model output (nomic-embed-text = 768); the app refuses to boot otherwise
+    embedding VECTOR(768) NOT NULL,
+    -- Model that produced the vector; retrieval only compares vectors from the active model
+    embedding_model VARCHAR(128) NOT NULL,
+    -- Maintained by PostgreSQL for the keyword half of hybrid retrieval
+    search_vector TSVECTOR GENERATED ALWAYS AS (to_tsvector('english', content)) STORED,
     token_count INTEGER NOT NULL,
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -200,7 +207,7 @@ ON document_chunk
 USING hnsw (embedding vector_cosine_ops)
 WITH (m = 16, ef_construction = 64);
 
-CREATE INDEX idx_chunk_tsv ON document_chunk USING gin (to_tsvector('english', content));
+CREATE INDEX idx_chunk_search_vector ON document_chunk USING gin (search_vector);
 CREATE INDEX idx_chunk_doc_ver ON document_chunk (document_id, document_version);
 
 -- 3. Jobs & Outbox Tables
@@ -404,9 +411,24 @@ export class DocumentChunk {
   @Column({ type: 'text' })
   content!: string;
 
-  // Custom vector type supported via raw sql / pgvector type transformer
-  @Column({ type: 'text', nullable: true })
-  embedding?: string;
+  // TypeORM serializes number[] to pgvector; HNSW index is created by migration (synchronize: false)
+  @Column({ type: 'vector', length: EMBEDDING_VECTOR_DIMENSION })
+  embedding!: number[];
+
+  @Column({ name: 'embedding_model', type: 'varchar', length: 128 })
+  embeddingModel!: string;
+
+  @Index('idx_chunk_search_vector', { type: 'gin' })
+  @Column({
+    name: 'search_vector',
+    type: 'tsvector',
+    generatedType: 'STORED',
+    asExpression: `to_tsvector('english', "content")`,
+    select: false,
+    insert: false,
+    update: false,
+  })
+  searchVector?: string;
 
   @Column({ name: 'token_count', type: 'int' })
   tokenCount!: number;
@@ -546,6 +568,22 @@ export class ConversationMessage {
   createdAt!: Date;
 }
 ```
+
+---
+
+## 🧱 Schema Management (Migrations)
+
+The schema is owned by TypeORM migrations in `apps/backend/src/database/migrations/`; the app runs pending migrations on startup (`migrationsRun: true`). `DATABASE_SYNCHRONIZE` defaults to `false` and should stay off outside throwaway databases.
+
+| Command (in `apps/backend`) | Purpose |
+| :--- | :--- |
+| `pnpm migration:generate src/database/migrations/<Name>` | Diff entities against the database and write a migration; register it in `migrations/index.ts` |
+| `pnpm migration:run` / `pnpm migration:revert` | Apply or roll back the latest migration |
+| `pnpm migration:show` | List applied and pending migrations |
+
+Rules:
+- Anything TypeORM cannot express (the HNSW index, extensions) is added to the migration by hand and marked `synchronize: false` on the entity so schema sync never drops it.
+- **Embeddings**: questions and passages are embedded with `IEmbeddingProvider.embed(texts, 'query' | 'document')`, which applies the model's task prefix (e.g. `search_query:` / `search_document:` for nomic). Changing the embedding model or its width requires a migration plus a full re-embed; retrieval filters on `embedding_model` so vectors from different models are never compared.
 
 ---
 

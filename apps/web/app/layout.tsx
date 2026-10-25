@@ -34,7 +34,8 @@ export default function RootLayout({
         <TooltipProvider>
           <div className="grid min-h-screen grid-cols-[220px_minmax(0,1fr)] text-sm">
             <AppSidebar />
-            <main className="mx-auto flex w-full max-w-240 min-w-0 flex-col gap-5 px-8 pt-8 pb-16">
+            {/* Full-height workspaces (chat) opt out of the centred column via data-layout="fullbleed" */}
+            <main className="mx-auto flex w-full max-w-240 min-w-0 flex-col gap-5 px-8 pt-8 pb-16 has-data-[layout=fullbleed]:max-w-none has-data-[layout=fullbleed]:p-0">
               {children}
             </main>
           </div>

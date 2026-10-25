@@ -10,7 +10,7 @@ export function SidebarNav({ sourceCount, documentCount }: { sourceCount: number
   const items = [
     { href: "/integrations", label: "Sources", count: sourceCount },
     { href: "/documents", label: "Documents", count: documentCount },
-    { href: "/assistant", label: "Assistant", count: null },
+    { href: "/chat", label: "Assistant", count: null },
   ];
 
   return items.map(({ href, label, count }) => (

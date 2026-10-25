@@ -15,9 +15,9 @@ import * as dotenv from 'dotenv';
 import * as path from 'path';
 import { loadConfiguration } from './config/configuration';
 
-// 1. Load the environment file early for OpenTelemetry initialization
-const envFile = `.env.${process.env.NODE_ENV || 'development'}`;
-dotenv.config({ path: path.resolve(process.cwd(), envFile) });
+// 1. Load env files early for OpenTelemetry initialization; `.env.<NODE_ENV>` wins over `.env`
+const envFiles = [`.env.${process.env.NODE_ENV || 'development'}`, '.env'];
+dotenv.config({ path: envFiles.map((file) => path.resolve(process.cwd(), file)), quiet: true });
 
 // 2. Load configuration object
 const config = loadConfiguration();
