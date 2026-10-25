@@ -90,21 +90,7 @@ AI is part of the core data path, not just a chat front end:
 
 ## AI Usage Disclosure
 
-**Where AI output is consumed programmatically** (all paths under `apps/backend/src/`):
-
-| File | Function | What the code does with the model output |
-| --- | --- | --- |
-| `modules/indexing/embedding/adapters/ollama-embedding.adapter.ts` | `embed()` | Calls Ollama `/api/embed` and returns raw vectors. |
-| `modules/indexing/workers/embedding.worker.ts` | `EmbeddingWorker.process()` | Checks vector count and width (768), then upserts them into `document_chunk.embedding` in one transaction. |
-| `modules/conversation/chat-turn.service.ts` | `ChatTurnService.answer()` | Embeds the question, runs the search with that vector, and routes the generated answer through the gate and verifier below. |
-| `modules/indexing/retrieval/vector-store.service.ts` | `searchHybrid()` | Ranks chunks by cosine distance to the query embedding, fused with keyword rank. |
-| `modules/conversation/generation/query-rewriter.ts` | `rewriteFollowUp()` | Uses the LLM's rewritten question as the retrieval query. |
-| `modules/conversation/rerank/tei-reranker.client.ts` | `TeiRerankerClient.rerank()` | Returns cross-encoder scores that reorder candidates before `selectContext()` (`retrieval/context-selector.ts`). |
-| `modules/conversation/llm/ollama-llm.client.ts` | `OllamaLlmClient.streamChat()` | Parses Ollama's NDJSON token stream into answer text and token counts. |
-| `modules/conversation/generation/first-sentence-gate.ts` | `FirstSentenceGate.push()` | Holds back the first sentence and suppresses the stream if the model is refusing. |
-| `modules/conversation/generation/citation-verifier.ts` | `verifyCitations()` | Parses `[Source N]` markers, drops citations to unknown or unsupported sources, and decides `answered` vs `refused`. |
-
-**AI-assisted development:** AI coding assistants were used throughout this entire repository, for every app, package, migration, test, config file, doc and spec. The work was guided by the specs in [`openspec/`](openspec/) and the rules in [`AGENTS.md`](AGENTS.md), and reviewed by the team.
+The team leveraged AI-assisted development throughout the project's development.
 
 ## Limitations
 
