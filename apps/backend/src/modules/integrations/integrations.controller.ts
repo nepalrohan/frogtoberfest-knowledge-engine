@@ -7,6 +7,8 @@ import {
   Req,
   Res,
   HttpStatus,
+  HttpCode,
+  Optional,
   UseGuards,
   BadRequestException,
 } from '@nestjs/common';
@@ -15,6 +17,7 @@ import { AppConfigService } from '../../config/configuration';
 import { NotionOAuthService } from './notion-oauth.service';
 import { NotionPagesService } from './notion-pages.service';
 import { ConnectionStorageService } from './connection-storage.service';
+import { ConnectorPersistenceService } from '../connector-persistence';
 import { StructuredLogger } from '../../common/logger';
 import { AdminAuthGuard } from '../../common/guards/admin-auth.guard';
 import {
@@ -38,6 +41,8 @@ export class IntegrationsController {
     private readonly notionOAuthService: NotionOAuthService,
     private readonly notionPagesService: NotionPagesService,
     private readonly connectionStorageService: ConnectionStorageService,
+    @Optional()
+    private readonly persistenceService?: ConnectorPersistenceService,
   ) { }
 
   /* Initiates OAuth authorization flow by returning the Notion authorization URL */
@@ -183,8 +188,9 @@ export class IntegrationsController {
     };
   }
 
-  /* Saves user-selected Notion page IDs (can be empty array to decouple connection from document selection) */
+  /* Saves user-selected Notion page IDs and enqueues background synchronization */
   @Post('pages')
+  @HttpCode(HttpStatus.ACCEPTED)
   @UseGuards(AdminAuthGuard)
   async savePages(
     @Body() body: SaveNotionPagesDto,
@@ -195,12 +201,60 @@ export class IntegrationsController {
     }
 
     const pageIds = Array.isArray(body?.pageIds) ? body.pageIds : [];
-    const updated = await this.connectionStorageService.saveSelectedPages('notion', pageIds);
+    let syncJobId = `sync-batch-notion-${Date.now()}`;
+    let updated = pageIds;
+
+    if (this.persistenceService) {
+      const result = await this.persistenceService.saveSelectedPagesAndEnqueueSync(
+        'notion',
+        pageIds,
+      );
+      syncJobId = result.syncJobId;
+      updated = result.selectedPageIds;
+    } else {
+      updated = await this.connectionStorageService.saveSelectedPages('notion', pageIds);
+    }
 
     return {
       success: true,
       selectedCount: updated.length,
       selectedPageIds: updated,
+      syncJobId,
+    };
+  }
+
+  /* Retrieves current synchronization status of tracked Notion resources */
+  @Get('sync/status')
+  @UseGuards(AdminAuthGuard)
+  async getSyncStatus(): Promise<{
+    provider: string;
+    items: Array<{
+      externalResourceId: string;
+      resourceType: string;
+      status: string;
+      attemptCount: number;
+      lastSyncedAt: Date | null;
+      lastObservedRevision: string | null;
+      lastProcessedFingerprint: string | null;
+      lastError: Record<string, any> | null;
+    }>;
+  }> {
+    if (!this.persistenceService) {
+      return { provider: 'notion', items: [] };
+    }
+    const items = await this.persistenceService.getSyncItems('notion');
+    return {
+      provider: 'notion',
+      items: items.map((item) => ({
+        externalResourceId: item.externalResourceId,
+        resourceType: item.resourceType,
+        status: item.status,
+        attemptCount: item.attemptCount,
+        lastSyncedAt: item.lastSyncedAt,
+        lastObservedRevision: item.lastObservedRevision,
+        lastProcessedFingerprint: item.lastProcessedFingerprint,
+        lastError: item.lastError,
+      })),
     };
   }
 

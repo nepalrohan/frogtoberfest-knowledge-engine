@@ -6,5 +6,6 @@ allowBuilds:
   '@scarf/scarf': false
   '@sentry/cli': false
   '@swc/core': false
+  msgpackr-extract: set this to true or false
   protobufjs: false
   unrs-resolver: false

@@ -343,12 +343,13 @@ describe('Notion OAuth Integration (e2e contract)', () => {
       .post('/api/v1/integrations/notion/pages')
       .set('x-admin-key', adminKey)
       .send({ pageIds: [] })
-      .expect(201);
+      .expect(202);
 
     expect(zeroSaveRes.body).toEqual({
       success: true,
       selectedCount: 0,
       selectedPageIds: [],
+      syncJobId: expect.any(String),
     });
 
     const statusAfterZero = await request(app.getHttpServer())
@@ -363,12 +364,13 @@ describe('Notion OAuth Integration (e2e contract)', () => {
       .post('/api/v1/integrations/notion/pages')
       .set('x-admin-key', adminKey)
       .send({ pageIds: ['page-doc-1'] })
-      .expect(201);
+      .expect(202);
 
     expect(saveRes.body).toEqual({
       success: true,
       selectedCount: 1,
       selectedPageIds: ['page-doc-1'],
+      syncJobId: expect.any(String),
     });
 
     /* 4. Verify selection is persisted and accessible on re-query */

@@ -50,6 +50,7 @@ export class SaveNotionPagesResponseDto {
   success!: boolean;
   selectedCount!: number;
   selectedPageIds!: string[];
+  syncJobId?: string;
 }
 
 /* Request payload to connect directly using a Notion Internal Integration Token */

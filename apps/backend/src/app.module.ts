@@ -7,10 +7,13 @@ import { configuration, AppConfigService } from './config/configuration';
 import { AppConfigModule } from './config/app-config.module';
 import { IntegrationsModule } from './modules/integrations/integrations.module';
 import { ConnectorPersistenceModule } from './modules/connector-persistence/connector-persistence.module';
+import { IngestionModule } from './modules/ingestion';
 import {
   ConnectorConnectionEntity,
   ConnectorCredentialEntity,
   OAuthStateEntity,
+  ConnectorSyncItemEntity,
+  ConnectorSyncOutboxEntity,
 } from './modules/connector-persistence/entities';
 
 @Module({
@@ -38,6 +41,8 @@ import {
             ConnectorConnectionEntity,
             ConnectorCredentialEntity,
             OAuthStateEntity,
+            ConnectorSyncItemEntity,
+            ConnectorSyncOutboxEntity,
           ],
           synchronize: config.nodeEnv === 'development' || config.nodeEnv === 'test',
           autoLoadEntities: true,
@@ -52,6 +57,7 @@ import {
       }),
     }),
     IntegrationsModule,
+    IngestionModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -107,13 +107,42 @@ export class MockRepository {
     return { affected: initialLen - this.data.length };
   });
 
+  clear = jest.fn().mockImplementation(async () => {
+    this.data = [];
+  });
+
+  findOneOrFail = jest.fn().mockImplementation(async (options?: any) => {
+    const item = await this.findOne(options);
+    if (!item) {
+      throw new Error('Entity not found');
+    }
+    return item;
+  });
+
+  update = jest.fn().mockImplementation(async (criteria: any, partialEntity: any) => {
+    const where = typeof criteria === 'object' ? criteria : { id: criteria };
+    const items = await this.find({ where });
+    for (const item of items) {
+      Object.assign(item, partialEntity);
+    }
+    return { affected: items.length };
+  });
+
   createQueryBuilder = jest.fn().mockImplementation(() => {
     const whereClauses: Array<{ field: string; val: any; op?: string }> = [];
     let setData: any = {};
     let isUpdate = false;
     let isDelete = false;
+    let takeLimit = Infinity;
 
     const builder: any = {
+      setLock: jest.fn().mockReturnThis(),
+      setOnLocked: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      take: jest.fn().mockImplementation((limit: number) => {
+        takeLimit = limit;
+        return builder;
+      }),
       update: jest.fn().mockImplementation(() => {
         isUpdate = true;
         return builder;
@@ -137,6 +166,8 @@ export class MockRepository {
             whereClauses.push({ field: 'state', val: params?.state });
           if (clause.includes('provider = :provider'))
             whereClauses.push({ field: 'provider', val: params?.provider });
+          if (clause.includes('status = :status'))
+            whereClauses.push({ field: 'status', val: params?.status });
           if (clause.includes('consumed_at IS NULL'))
             whereClauses.push({ field: 'consumedAt', val: null });
           if (clause.includes('expires_at > :now'))
@@ -148,6 +179,21 @@ export class MockRepository {
           return builder;
         },
       ),
+      getMany: jest.fn().mockImplementation(async () => {
+        const matches = this.data.filter((item) => {
+          return whereClauses.every((wc) => {
+            if (wc.op === '>') {
+              return (
+                item[wc.field] &&
+                new Date(item[wc.field]).getTime() >
+                  new Date(wc.val).getTime()
+              );
+            }
+            return item[wc.field] === wc.val;
+          });
+        });
+        return matches.slice(0, takeLimit);
+      }),
       execute: jest.fn().mockImplementation(async () => {
         const matches = this.data.filter((item) => {
           return whereClauses.every((wc) => {
@@ -206,6 +252,11 @@ export class MockDataSource {
           return repo.save(entity);
         },
         create: (entityClass: any, obj: any) => ({ ...obj }),
+        createQueryBuilder: (entityClass: any, alias?: string) => {
+          const name = entityClass?.name || 'default';
+          const repo = new MockRepository(name);
+          return repo.createQueryBuilder();
+        },
       };
       return cb(manager);
     });

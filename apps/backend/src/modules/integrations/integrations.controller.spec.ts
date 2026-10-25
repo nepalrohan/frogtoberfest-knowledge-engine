@@ -239,6 +239,7 @@ describe('IntegrationsController', () => {
         success: true,
         selectedCount: 2,
         selectedPageIds: ['page-1', 'page-2'],
+        syncJobId: expect.any(String),
       });
       expect(mockStorageService.saveSelectedPages).toHaveBeenCalledWith('notion', ['page-1', 'page-2']);
     });
@@ -254,6 +255,15 @@ describe('IntegrationsController', () => {
         success: true,
         selectedCount: 0,
         selectedPageIds: [],
+        syncJobId: expect.any(String),
+      });
+    });
+
+    it('should return empty sync items when persistence service is not provided', async () => {
+      const response = await controller.getSyncStatus();
+      expect(response).toEqual({
+        provider: 'notion',
+        items: [],
       });
     });
   });

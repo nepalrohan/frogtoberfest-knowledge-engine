@@ -4,6 +4,8 @@ import {
   ConnectorConnectionEntity,
   ConnectorCredentialEntity,
   OAuthStateEntity,
+  ConnectorSyncItemEntity,
+  ConnectorSyncOutboxEntity,
 } from './entities';
 import {
   CredentialEncryptionService,
@@ -11,6 +13,7 @@ import {
 } from './credential-encryption.service';
 import { OAuthStateService } from './oauth-state.service';
 import { ConnectorPersistenceService } from './connector-persistence.service';
+import { SyncOutboxRelayService } from './sync-outbox.relay';
 import {
   ConnectorPersistenceAsyncOptions,
   ConnectorPersistenceOptions,
@@ -25,17 +28,21 @@ import {
       ConnectorConnectionEntity,
       ConnectorCredentialEntity,
       OAuthStateEntity,
+      ConnectorSyncItemEntity,
+      ConnectorSyncOutboxEntity,
     ]),
   ],
   providers: [
     CredentialEncryptionService,
     OAuthStateService,
     ConnectorPersistenceService,
+    SyncOutboxRelayService,
   ],
   exports: [
     ConnectorPersistenceService,
     CredentialEncryptionService,
     OAuthStateService,
+    SyncOutboxRelayService,
   ],
 })
 export class ConnectorPersistenceModule {

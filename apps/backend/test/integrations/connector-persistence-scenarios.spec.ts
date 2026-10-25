@@ -263,4 +263,44 @@ describe('Connector Persistence Scenarios A–F & Concurrency', () => {
     );
     expect(replayResult).toBe(false);
   });
+
+  /* Scenario G: Resource selection, sync items upsert, outbox creation, and deselection */
+  it('Scenario G: Selection persists sync items and outbox events, and marks deselected items', async () => {
+    /* 1. Connect notion */
+    await persistenceService.saveConnection({
+      provider: 'notion',
+      externalAccountId: 'workspace-sync-1',
+      externalAccountName: 'Sync Workspace',
+      connectedByUserId: 'admin-user',
+      authType: ConnectorAuthType.OAUTH2,
+      credentialPayload: { accessToken: 'secret_sync_token' },
+    });
+
+    /* 2. Select initial pages ['page-1', 'page-2'] */
+    const initialSync = await persistenceService.saveSelectedPagesAndEnqueueSync('notion', [
+      'page-1',
+      'page-2',
+    ]);
+    expect(initialSync.selectedCount).toBe(2);
+    expect(initialSync.syncJobId).toContain('sync-batch-');
+
+    const itemsAfterInitial = await persistenceService.getSyncItems('notion');
+    expect(itemsAfterInitial).toHaveLength(2);
+    expect(itemsAfterInitial.map((i) => i.externalResourceId).sort()).toEqual(['page-1', 'page-2']);
+    expect(itemsAfterInitial.every((i) => i.status === 'PENDING')).toBe(true);
+
+    /* 3. Update selection to ['page-2', 'page-3'] -> page-1 is deselected, page-3 is pending */
+    await persistenceService.saveSelectedPagesAndEnqueueSync('notion', ['page-2', 'page-3']);
+
+    const itemsAfterUpdate = await persistenceService.getSyncItems('notion');
+    expect(itemsAfterUpdate).toHaveLength(3);
+
+    const page1 = itemsAfterUpdate.find((i) => i.externalResourceId === 'page-1');
+    const page2 = itemsAfterUpdate.find((i) => i.externalResourceId === 'page-2');
+    const page3 = itemsAfterUpdate.find((i) => i.externalResourceId === 'page-3');
+
+    expect(page1?.status).toBe('DESELECTED');
+    expect(page2?.status).toBe('PENDING');
+    expect(page3?.status).toBe('PENDING');
+  });
 });

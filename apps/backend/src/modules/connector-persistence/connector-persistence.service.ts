@@ -9,6 +9,9 @@ import { DataSource, In, Repository } from 'typeorm';
 import {
   ConnectorConnectionEntity,
   ConnectorCredentialEntity,
+  ConnectorSyncItemEntity,
+  ConnectorSyncItemStatus,
+  ConnectorSyncOutboxEntity,
 } from './entities';
 import {
   ConnectorAuthType,
@@ -18,6 +21,7 @@ import {
   SaveConnectionParams,
 } from './interfaces/connector-connection.interface';
 import { CredentialEncryptionService } from './credential-encryption.service';
+import { TraceContextPropagator } from '../../common/telemetry';
 
 /* Core persistence service managing durable connections, encrypted credentials, and multi-connector lifecycle */
 @Injectable()
@@ -29,9 +33,13 @@ export class ConnectorPersistenceService {
     private readonly connectionRepo: Repository<ConnectorConnectionEntity>,
     @InjectRepository(ConnectorCredentialEntity)
     private readonly credentialRepo: Repository<ConnectorCredentialEntity>,
+    @InjectRepository(ConnectorSyncItemEntity)
+    private readonly syncItemRepo: Repository<ConnectorSyncItemEntity>,
+    @InjectRepository(ConnectorSyncOutboxEntity)
+    private readonly outboxRepo: Repository<ConnectorSyncOutboxEntity>,
     private readonly encryptionService: CredentialEncryptionService,
     private readonly dataSource: DataSource,
-  ) {}
+  ) { }
 
   /* Maps an entity into a safe client-facing DTO without credential material */
   private toSafeDto(
@@ -276,11 +284,120 @@ export class ConnectorPersistenceService {
     }
   }
 
+  /* Atomically saves selected page IDs, updates sync tracking items, marks deselected items, and registers outbox records */
+  async saveSelectedPagesAndEnqueueSync(
+    provider: string,
+    pageIds: string[],
+    resourceType = 'page',
+  ): Promise<{ syncJobId: string; selectedCount: number; selectedPageIds: string[] }> {
+    const uniquePages = Array.from(new Set(pageIds));
+
+    return this.dataSource.transaction(async (manager) => {
+      const connection = await manager.findOne(ConnectorConnectionEntity, {
+        where: {
+          provider,
+          status: ConnectorConnectionStatus.CONNECTED,
+        },
+      });
+
+      if (!connection) {
+        throw new NotFoundException(
+          `Cannot save pages: active connection for ${provider} does not exist`,
+        );
+      }
+
+      const now = new Date();
+      const currentMetadata = connection.metadata || {};
+      connection.metadata = {
+        ...currentMetadata,
+        selectedPageIds: uniquePages,
+      };
+      connection.updatedAt = now;
+      await manager.save(ConnectorConnectionEntity, connection);
+
+      /* Load existing sync items for this connection */
+      const existingItems = await manager.find(ConnectorSyncItemEntity, {
+        where: { connectionId: connection.id },
+      });
+      const existingMap = new Map(existingItems.map((item) => [item.externalResourceId, item]));
+
+      const syncJobId = `sync-batch-${connection.id}-${Date.now()}`;
+
+      /* Upsert sync items and create outbox events */
+      for (const pageId of uniquePages) {
+        let item = existingMap.get(pageId);
+        if (item) {
+          item.status = ConnectorSyncItemStatus.PENDING;
+          item.attemptCount = 0;
+          item.nextAttemptAt = now;
+          item.updatedAt = now;
+          await manager.save(ConnectorSyncItemEntity, item);
+        } else {
+          item = manager.create(ConnectorSyncItemEntity, {
+            connectionId: connection.id,
+            externalResourceId: pageId,
+            resourceType,
+            status: ConnectorSyncItemStatus.PENDING,
+            attemptCount: 0,
+            nextAttemptAt: now,
+            createdAt: now,
+            updatedAt: now,
+          });
+          item = await manager.save(ConnectorSyncItemEntity, item);
+        }
+
+        /* Record transactional outbox event with trace context propagation */
+        const outboxPayload: Record<string, any> = {
+          syncItemId: item.id,
+          connectionId: connection.id,
+          provider,
+          externalResourceId: pageId,
+          resourceType,
+        };
+        TraceContextPropagator.injectToCarrier(outboxPayload);
+
+        const outboxEvent = manager.create(ConnectorSyncOutboxEntity, {
+          connectionId: connection.id,
+          externalResourceId: pageId,
+          eventType: 'SYNC_RESOURCE',
+          payload: outboxPayload,
+          status: 'pending',
+          attemptCount: 0,
+          createdAt: now,
+        });
+        await manager.save(ConnectorSyncOutboxEntity, outboxEvent);
+      }
+
+      /* Mark unselected resources as DESELECTED */
+      const selectedSet = new Set(uniquePages);
+      for (const item of existingItems) {
+        if (!selectedSet.has(item.externalResourceId) && item.status !== ConnectorSyncItemStatus.DESELECTED) {
+          item.status = ConnectorSyncItemStatus.DESELECTED;
+          item.updatedAt = now;
+          await manager.save(ConnectorSyncItemEntity, item);
+        }
+      }
+
+      this.logger.log(`Enqueued sync for ${uniquePages.length} pages under connection ${connection.id}`);
+      return {
+        syncJobId,
+        selectedCount: uniquePages.length,
+        selectedPageIds: uniquePages,
+      };
+    });
+  }
+
   /* Stores selected page IDs inside connection metadata */
   async saveSelectedPages(
     provider: string,
     pageIds: string[],
   ): Promise<string[]> {
+    const result = await this.saveSelectedPagesAndEnqueueSync(provider, pageIds);
+    return result.selectedPageIds;
+  }
+
+  /* Retrieves tracking items for a given provider connection */
+  async getSyncItems(provider: string): Promise<ConnectorSyncItemEntity[]> {
     const connection = await this.connectionRepo.findOne({
       where: {
         provider,
@@ -289,21 +406,13 @@ export class ConnectorPersistenceService {
     });
 
     if (!connection) {
-      throw new NotFoundException(
-        `Cannot save pages: active connection for ${provider} does not exist`,
-      );
+      return [];
     }
 
-    const uniquePages = Array.from(new Set(pageIds));
-    const currentMetadata = connection.metadata || {};
-    connection.metadata = {
-      ...currentMetadata,
-      selectedPageIds: uniquePages,
-    };
-    connection.updatedAt = new Date();
-
-    await this.connectionRepo.save(connection);
-    return uniquePages;
+    return this.syncItemRepo.find({
+      where: { connectionId: connection.id },
+      order: { createdAt: 'ASC' },
+    });
   }
 
   /* Retrieves selected page IDs from connection metadata */
