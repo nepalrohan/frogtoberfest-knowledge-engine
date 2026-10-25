@@ -10,11 +10,16 @@ import {
   DropdownMenuTrigger,
 } from "@repo/ui";
 import { getNotionStatus } from "@/lib/api";
-import { getAvailableDocuments, SAMPLE_USER } from "@/lib/sample-data";
+import { apiClient } from "@/lib/api-client";
+import { SAMPLE_USER } from "@/lib/sample-data";
 import { SidebarNav } from "./sidebar-nav";
 
 export async function AppSidebar() {
-  const notion = await getNotionStatus();
+  /* Counts are best-effort: an unreachable backend shows 0 rather than breaking the shell */
+  const [notion, documents] = await Promise.all([
+    getNotionStatus(),
+    apiClient.ingestion.listDocuments().catch(() => []),
+  ]);
   const notionConnected = Boolean(notion?.connected);
 
   return (
@@ -26,7 +31,7 @@ export async function AppSidebar() {
 
       <SidebarNav
         sourceCount={notionConnected ? 1 : 0}
-        documentCount={getAvailableDocuments(notionConnected).length}
+        documentCount={documents.length}
       />
 
       <div className="flex-1" />

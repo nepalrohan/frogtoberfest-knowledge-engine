@@ -20,10 +20,13 @@ export const LogEvents = {
   RETRIEVAL_COMPLETED: 'retrieval.completed',
   RETRIEVAL_NO_EVIDENCE: 'retrieval.no_evidence',
   RETRIEVAL_FAILED: 'retrieval.failed',
+  RETRIEVAL_RERANK_FAILED: 'retrieval.rerank_failed',
 
   // Chat & LLM Generation
   CHAT_REQUEST_COMPLETED: 'chat.request.completed',
   CHAT_REQUEST_FAILED: 'chat.request.failed',
+  CHAT_ANSWER_CACHE_HIT: 'chat.answer_cache.hit',
+  CHAT_PROMPT_TRIMMED: 'chat.prompt.trimmed',
 } as const;
 
 export type LogEvent = (typeof LogEvents)[keyof typeof LogEvents] | string;

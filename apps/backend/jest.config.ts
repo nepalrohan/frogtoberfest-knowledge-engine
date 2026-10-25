@@ -23,7 +23,6 @@ const config: Config = {
   ],
 
   moduleNameMapper: {
-    '^@nestjs/typeorm$': '<rootDir>/test/mocks/nestjs-typeorm.mock.ts',
     '^.*utils/load-package\\.util(\\.js)?$': '<rootDir>/test/mocks/load-package.util.ts',
   },
 
