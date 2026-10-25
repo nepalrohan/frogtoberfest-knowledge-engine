@@ -9,12 +9,12 @@ export const metadata: Metadata = {
   description: "Ask grounded questions over ingested engineering docs, incidents, and policies.",
 };
 
-/* Chat shell: conversation sidebar plus the active conversation, sharing one stream-owning provider */
+/* Chat shell inside the app sidebar: conversation list plus the active conversation, sharing one stream-owning provider */
 export default function ChatLayout({ children }: { children: React.ReactNode }) {
   return (
     <ChatProvider>
       <TooltipProvider>
-        <SidebarProvider>
+        <SidebarProvider data-layout="fullbleed" className="h-svh">
           <ChatSidebar />
           <SidebarInset className="min-w-0">{children}</SidebarInset>
         </SidebarProvider>

@@ -2,21 +2,10 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
+/* Shared shadcn components live outside this app, so Tailwind must scan them too */
 @source "../../../packages/ui/src";
 
 @custom-variant dark (&:is(.dark *));
-
-html,
-body {
-  max-width: 100vw;
-  overflow-x: hidden;
-}
-
-
-a {
-  color: inherit;
-  text-decoration: none;
-}
 
 .imgDark {
   display: none;
@@ -38,6 +27,8 @@ a {
 @theme inline {
   --font-heading: var(--font-sans);
   --font-sans: var(--font-sans);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -69,33 +60,39 @@ a {
   --color-card: var(--card);
   --color-foreground: var(--foreground);
   --color-background: var(--background);
-  --radius-sm: calc(var(--radius) * 0.6);
-  --radius-md: calc(var(--radius) * 0.8);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) * 1.4);
-  --radius-2xl: calc(var(--radius) * 1.8);
-  --radius-3xl: calc(var(--radius) * 2.2);
-  --radius-4xl: calc(var(--radius) * 2.6);
+  /* Design radius scale, pinned rather than derived from --radius */
+  --radius-sm: 6px;
+  --radius-md: 7px;
+  --radius-lg: 8px;
+  --radius-xl: 10px;
+  --radius-2xl: 12px;
+  --radius-3xl: 16px;
+  --radius-4xl: 20px;
+  --shadow-menu: 0 8px 24px rgb(0 0 0 / 0.08);
+  --color-overlay: var(--overlay);
+  --color-destructive-foreground: var(--destructive-foreground);
 }
 
 :root {
-  --background: oklch(0.985 0.002 247.8);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.96 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.955 0 0);
-  --muted-foreground: oklch(0.48 0 0);
-  --accent: oklch(0.96 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.895 0 0);
-  --input: oklch(0.895 0 0);
+  --background: #fafaf9;
+  --foreground: #18181a;
+  --card: #ffffff;
+  --card-foreground: #18181a;
+  --popover: #ffffff;
+  --popover-foreground: #18181a;
+  --primary: #18181a;
+  --primary-foreground: #fafaf9;
+  --secondary: #f3f3f1;
+  --secondary-foreground: #18181a;
+  --muted: #f3f3f1;
+  --muted-foreground: #6b6b68;
+  --accent: #f3f3f1;
+  --accent-foreground: #18181a;
+  --destructive: oklch(0.56 0.19 27);
+  --destructive-foreground: #ffffff;
+  --overlay: rgb(20 20 19 / 0.25);
+  --border: #e6e6e2;
+  --input: #e6e6e2;
   --ring: oklch(0.708 0 0);
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
@@ -111,6 +108,8 @@ a {
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+  --success: oklch(0.6 0.13 155);
+  --warning: oklch(0.7 0.13 75);
 }
 
 .dark {
@@ -129,6 +128,8 @@ a {
   --accent: oklch(0.269 0 0);
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: #ffffff;
+  --overlay: rgb(0 0 0 / 0.5);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);
@@ -145,6 +146,8 @@ a {
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
+  --success: oklch(0.7 0.13 155);
+  --warning: oklch(0.75 0.13 75);
 }
 
 @layer base {
@@ -152,7 +155,7 @@ a {
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-sm/normal text-foreground;
   }
   html {
     @apply font-sans;

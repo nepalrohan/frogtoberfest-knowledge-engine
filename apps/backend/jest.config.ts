@@ -7,7 +7,7 @@ const config: Config = {
 
   moduleFileExtensions: ['js', 'json', 'ts'],
 
-  testRegex: '.*\\.spec\\.ts$',
+  testRegex: '.*\\.(spec|e2e-spec)\\.ts$',
 
   transform: {
     '^.+\\.(t|j)s$': [

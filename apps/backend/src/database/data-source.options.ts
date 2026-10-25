@@ -8,6 +8,11 @@ import {
   Conversation,
   ConversationMessage,
 } from '../entities';
+import {
+  ConnectorConnectionEntity,
+  ConnectorCredentialEntity,
+  OAuthStateEntity,
+} from '../modules/connector-persistence/entities';
 import { MIGRATIONS } from './migrations';
 
 /* Single source of connection options for the Nest app and the TypeORM migration CLI */
@@ -33,6 +38,9 @@ export function buildDataSourceOptions(
       DocumentChunk,
       Conversation,
       ConversationMessage,
+      ConnectorConnectionEntity,
+      ConnectorCredentialEntity,
+      OAuthStateEntity,
     ],
     extra: {
       max: 20,

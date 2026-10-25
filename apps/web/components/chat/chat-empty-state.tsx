@@ -1,22 +1,10 @@
 "use client";
 
 import { BookOpenText } from "lucide-react";
-import { Button } from "@repo/ui/components/button";
-import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@repo/ui/components/empty";
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@repo/ui/components/empty";
 
-const SUGGESTIONS = [
-  "What is our incident escalation process for a SEV1?",
-  "How do I roll back a bad deploy?",
-  "Why did we choose pgvector over a vector database?",
-  "What's the on-call swap rule before taking leave?",
-];
-
-interface ChatEmptyStateProps {
-  onPick: (question: string) => void;
-}
-
-/* First screen of a new conversation with starter questions. */
-export function ChatEmptyState({ onPick }: ChatEmptyStateProps) {
+/* First screen of a new conversation. */
+export function ChatEmptyState() {
   return (
     <Empty className="border-0">
       <EmptyHeader>
@@ -29,20 +17,6 @@ export function ChatEmptyState({ onPick }: ChatEmptyStateProps) {
           says so.
         </EmptyDescription>
       </EmptyHeader>
-      <EmptyContent className="max-w-xl">
-        <div className="grid w-full gap-2 sm:grid-cols-2">
-          {SUGGESTIONS.map((question) => (
-            <Button
-              key={question}
-              variant="outline"
-              className="h-auto justify-start py-2 text-left text-xs whitespace-normal"
-              onClick={() => onPick(question)}
-            >
-              {question}
-            </Button>
-          ))}
-        </div>
-      </EmptyContent>
     </Empty>
   );
 }

@@ -3,12 +3,11 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Database, MessageSquare, MoreHorizontal, SquarePen, Trash2 } from "lucide-react";
+import { MessageSquare, MoreHorizontal, SquarePen, Trash2 } from "lucide-react";
 import type { ConversationSummary } from "@repo/api-client";
 import {
   Sidebar,
   SidebarContent,
-  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
@@ -17,7 +16,7 @@ import {
   SidebarMenuAction,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarRail,
+  useSidebar,
 } from "@repo/ui/components/sidebar";
 import {
   DropdownMenu,
@@ -67,6 +66,8 @@ export function ChatSidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const { conversations, conversationsStatus, remove, resetNewThread } = useChat();
+  /* Non-collapsible panel next to the app nav, so the header toggle shows/hides it outright */
+  const { open } = useSidebar();
   const [pendingDelete, setPendingDelete] = useState<ConversationSummary | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
@@ -86,14 +87,8 @@ export function ChatSidebar() {
 
   return (
     <>
-      <Sidebar>
+      <Sidebar collapsible="none" className={open ? "h-svh border-r" : "hidden"}>
         <SidebarHeader>
-          <div className="flex items-center gap-2 px-2 py-1.5">
-            <div className="flex size-7 items-center justify-center rounded-lg bg-foreground text-[11px] font-bold text-background">
-              KE
-            </div>
-            <span className="text-sm font-semibold tracking-tight">Knowledge Engine</span>
-          </div>
           <SidebarMenu>
             <SidebarMenuItem>
               <SidebarMenuButton render={<Link href="/chat" onClick={resetNewThread} />}>
@@ -159,18 +154,6 @@ export function ChatSidebar() {
             </SidebarGroup>
           ))}
         </SidebarContent>
-
-        <SidebarFooter>
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton render={<Link href="/" />}>
-                <Database />
-                <span>Ingestion console</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
-        </SidebarFooter>
-        <SidebarRail />
       </Sidebar>
 
       <AlertDialog open={pendingDelete !== null} onOpenChange={(open) => !open && setPendingDelete(null)}>

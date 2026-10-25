@@ -124,7 +124,7 @@ export function ChatView({ conversationId }: { conversationId: string | null }) 
             )}
 
             {!isLoading && thread?.status !== "error" && messages.length === 0 && (
-              <ChatEmptyState onPick={(question) => void send(conversationId, question)} />
+              <ChatEmptyState />
             )}
 
             {messages.map((message) => (

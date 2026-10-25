@@ -15,10 +15,12 @@ const geistMono = localFont({
   variable: "--font-geist-mono",
 });
 
+import { TooltipProvider, Toaster } from "@repo/ui";
+import { AppSidebar } from "./components/app-sidebar";
+
 export const metadata: Metadata = {
-  title: "Knowledge Engine — Document Ingestion & Vector Pipeline",
-  description:
-    "High-throughput knowledge ingestion pipeline with transactional outbox relay, BullMQ queues, and pgvector embeddings.",
+  title: "Knowledge Engine | Internal Knowledge Assistant",
+  description: "Enterprise knowledge engine with Notion & Confluence RAG pipelines",
 };
 
 export default function RootLayout({
@@ -28,8 +30,17 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={cn("font-sans", geist.variable)}>
-      <body className={`${geistSans.variable} ${geistMono.variable}`}>
-        {children}
+      <body className={`${geistSans.variable} ${geistMono.variable} min-h-screen bg-background text-foreground antialiased`}>
+        <TooltipProvider>
+          <div className="grid min-h-screen grid-cols-[220px_minmax(0,1fr)] text-sm">
+            <AppSidebar />
+            {/* Full-height workspaces (chat) opt out of the centred column via data-layout="fullbleed" */}
+            <main className="mx-auto flex w-full max-w-240 min-w-0 flex-col gap-5 px-8 pt-8 pb-16 has-data-[layout=fullbleed]:max-w-none has-data-[layout=fullbleed]:p-0">
+              {children}
+            </main>
+          </div>
+          <Toaster position="top-right" />
+        </TooltipProvider>
       </body>
     </html>
   );
