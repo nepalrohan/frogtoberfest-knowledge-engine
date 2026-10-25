@@ -13,7 +13,7 @@ Team knowledge is scattered across tools like Notion and Confluence that nobody 
 
 ## Demo
 
-- **Video:** _add link_
+- **Video:** (https://drive.google.com/file/d/12AhvA4M_p36ahjo4Kf-bsDIFiR1LzeQr/view)
 - **Workflow:** connect a source (e.g. Notion) → select resources → they sync and are indexed → ask in chat → get a cited answer, or a clear refusal.
 
 ## Architecture
