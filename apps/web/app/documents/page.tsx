@@ -1,5 +1,6 @@
 import { PageHeader } from "@/app/components/page-header";
 import { IngestionDashboard } from "./ingestion-dashboard";
+import { apiBaseUrl } from "@/lib/api-client";
 
 /* Intake for raw files and text, plus the live feed of documents and their indexing status */
 export default function DocumentsPage() {
@@ -11,7 +12,7 @@ export default function DocumentsPage() {
         actions={
           <a
             id="swagger-docs-link"
-            href="http://localhost:5000/api/docs"
+            href={`${apiBaseUrl}/api/docs`}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
