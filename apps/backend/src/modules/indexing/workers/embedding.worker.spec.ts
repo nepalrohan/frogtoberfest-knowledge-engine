@@ -133,7 +133,8 @@ describe('EmbeddingWorker (Phase 6)', () => {
 
     expect(mockDocRepo.findOne).toHaveBeenCalledWith({ where: { id: 'doc-uuid-1' } });
     expect(mockChunker.chunk).toHaveBeenCalledWith(mockDoc.normalizedContent);
-    expect(mockEmbeddingProvider.embed).toHaveBeenCalledWith(['# Guide', 'Content here'], 'document');
+    /* Each chunk is embedded with its heading path in front */
+    expect(mockEmbeddingProvider.embed).toHaveBeenCalledWith(['Guide\n\n# Guide', 'Guide\n\nContent here'], 'document');
 
     expect(mockChunkRepo.delete).toHaveBeenCalledWith({ documentId: 'doc-uuid-1' });
     expect(mockChunkRepo.save).toHaveBeenCalledWith([

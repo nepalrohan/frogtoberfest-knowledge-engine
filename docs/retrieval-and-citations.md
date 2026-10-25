@@ -251,6 +251,6 @@ flowchart TD
 3. **Database Write Precondition**: The response is **never** sent to the client unless the database commit to `conversation_message` succeeds.
 
 ### As implemented: claim support and early refusal
-- **Claim support**: each `[Source N]` must sit in a sentence (or list item) that shares at least one content word (prefix-matched) with source N's title, headings or text. Citations with no overlap are removed and counted in `run.unsupportedCitations`; if none remain, the answer is refused as `unverifiable_citations`. This is a cheap lexical check, not proof of entailment.
+- **Claim support**: each `[Source N]` must sit in a sentence (or list item) that shares at least one content word (prefix-matched) with source N's title, headings or text. Citations with no overlap are removed and counted in `run.unsupportedCitations`; if none remain, the answer is still shown with `run.citationsUnverified: true`, the UI warns that its citations can't be verified, and it is never reused from the answer cache. This is a cheap lexical check, not proof of entailment.
 - **First-sentence gate**: streamed tokens are held until the first sentence ends; a first sentence declaring insufficient evidence is never shown as a half-answer.
 - **Refusal explanation**: an insufficient-evidence refusal names the closest documents checked, so the user can rephrase or ingest the missing topic.

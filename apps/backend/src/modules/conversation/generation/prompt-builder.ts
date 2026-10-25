@@ -1,6 +1,8 @@
 import { TokenCounter } from '../../indexing/chunker/token-counter';
+import { chunkHeading } from '../../indexing/chunker/chunk-heading';
 import type { HistoryMessage } from '../conversation.service';
 import { INSUFFICIENT_EVIDENCE_TEXT } from './answer-text';
+import { formatHint } from './format-hint';
 import type { ChatSource } from '../chat.types';
 import type { LlmMessage } from '../llm/llm-client.interface';
 
@@ -44,18 +46,21 @@ export function buildAnswerPrompt({
   sources: ChatSource[];
 }): LlmMessage[] {
   const documents = sources.map((s) => {
-    const title = escapeAttribute(
-      [s.documentTitle, ...s.sectionHeaders.slice(1)].join(' › '),
-    );
+    const title = escapeAttribute(chunkHeading(s.documentTitle, s.sectionHeaders));
     return `<source_document id="${s.index}" title="${title}">\n${escapeBody(s.snippet)}\n</source_document>`;
   });
+  const hint = formatHint(question);
 
   return [
     { role: 'system', content: SYSTEM_PROMPT },
     ...history.map(({ role, content }) => ({ role, content })),
     {
       role: 'user',
-      content: [...documents, `Question: ${question}`].join('\n\n'),
+      content: [
+        ...documents,
+        `Question: ${question}`,
+        ...(hint ? [`Format: ${hint}`] : []),
+      ].join('\n\n'),
     },
   ];
 }

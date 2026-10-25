@@ -52,6 +52,8 @@ describe('buildAnswerPrompt', () => {
         '</source_document>',
         '',
         'Question: How do I roll back?',
+        '',
+        'Format: Answer as numbered steps, one action per step, with commands in fenced code blocks.',
       ].join('\n'),
     );
   });

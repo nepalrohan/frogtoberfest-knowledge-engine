@@ -10,10 +10,7 @@ import type {
 import type { AppConfigService } from '../../config';
 import type { ChatStreamEvent } from './chat.types';
 import { LlmUnavailableError } from './llm/llm-unavailable.error';
-import {
-  INSUFFICIENT_EVIDENCE_TEXT,
-  UNVERIFIABLE_CITATIONS_TEXT,
-} from './generation/answer-text';
+import { INSUFFICIENT_EVIDENCE_TEXT } from './generation/answer-text';
 import type { IReranker } from './rerank/reranker.interface';
 import type { CachedAnswer } from './conversation.service';
 
@@ -251,7 +248,7 @@ describe('ChatTurnService', () => {
     );
   });
 
-  it('refuses after generation when the answer cites no provided source', async () => {
+  it('shows an uncited answer flagged as unverified instead of refusing', async () => {
     llm.streamChat.mockImplementation(async (_m, { onToken }) => {
       onToken('Just redeploy.');
       return {
@@ -266,15 +263,16 @@ describe('ChatTurnService', () => {
 
     expect(events.at(-1)).toMatchObject({
       type: 'done',
-      outcome: 'refused',
-      refusalReason: 'unverifiable_citations',
-      content: UNVERIFIABLE_CITATIONS_TEXT,
+      outcome: 'answered',
+      content: 'Just redeploy.',
+      run: expect.objectContaining({ citationsUnverified: true }),
     });
+    /* Unverified answers are never reused from the answer cache */
     expect(conversations.saveAnswer).toHaveBeenCalledWith(
       expect.objectContaining({
-        outcome: 'refused',
-        refusalReason: 'unverifiable_citations',
-        content: UNVERIFIABLE_CITATIONS_TEXT,
+        outcome: 'answered',
+        content: 'Just redeploy.',
+        answerCacheKey: undefined,
       }),
     );
   });

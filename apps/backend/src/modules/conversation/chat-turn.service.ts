@@ -38,6 +38,7 @@ import type {
   RunDetails,
   StageTiming,
 } from './chat.types';
+import { withChunkHeading } from '../indexing/chunker/chunk-heading';
 
 export interface TurnSink {
   emit: (event: ChatStreamEvent) => void;
@@ -353,8 +354,13 @@ export class ChatTurnService {
           ...(verified.unsupportedCitations
             ? { unsupportedCitations: verified.unsupportedCitations }
             : {}),
+          ...(verified.citationsUnverified ? { citationsUnverified: true } : {}),
         },
-        answerCacheKey: verified.outcome === 'answered' ? cacheKey : undefined,
+        /* Only verified answers are reused for identical questions */
+        answerCacheKey:
+          verified.outcome === 'answered' && !verified.citationsUnverified
+            ? cacheKey
+            : undefined,
       });
     } catch (err) {
       if (!sink.signal.aborted) {
@@ -398,7 +404,9 @@ export class ChatTurnService {
     try {
       const scores = await this.reranker.rerank(
         query,
-        candidates.map((c) => c.content),
+        candidates.map((c) =>
+          withChunkHeading(c.documentTitle, c.sectionHeaders, c.content),
+        ),
         { signal },
       );
       return candidates

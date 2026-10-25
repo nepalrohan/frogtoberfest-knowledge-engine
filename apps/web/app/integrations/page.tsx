@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import type { NotionConnectionStatus } from "@repo/api-client";
 import { Button, Card } from "@repo/ui";
 import { getNotionStatus } from "@/lib/api";
@@ -44,7 +45,10 @@ export default async function SourcesPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <IntegrationToaster />
+      {/* useSearchParams needs a Suspense boundary or the production build fails */}
+      <Suspense fallback={null}>
+        <IntegrationToaster />
+      </Suspense>
 
       <PageHeader
         title="Knowledge Sources"
