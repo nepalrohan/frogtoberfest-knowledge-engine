@@ -1,109 +1,73 @@
-import { Test, TestingModule } from '@nestjs/testing';
-import { DataSource } from 'typeorm';
-import { SyncOutboxRelayService, INGESTION_SYNC_QUEUE, SYNC_QUEUE_PUBLISHER } from './sync-outbox.relay';
-import { ConnectorSyncOutboxEntity } from './entities/connector-sync-outbox.entity';
-import { ISyncQueuePublisher } from './interfaces/sync-outbox-relay.interface';
+import { ConfigService } from '@nestjs/config';
+import { AppConfigService } from '../../config';
+import type { IOutboxStore, OutboxOutcome, OutboxRecord } from '../../common/outbox/outbox.types';
+import type { SyncResourceJobPayload } from '../queue/queue.constants';
+import { SyncOutboxRelayService, buildSyncJobId } from './sync-outbox.relay';
+
+/* Single-batch store returning prepared records and capturing recorded outcomes */
+class FakeSyncOutboxStore implements IOutboxStore<SyncResourceJobPayload> {
+  recorded: OutboxOutcome[] = [];
+
+  constructor(private records: OutboxRecord<SyncResourceJobPayload>[]) {}
+
+  async claimBatch(): Promise<OutboxRecord<SyncResourceJobPayload>[]> {
+    const claimed = this.records;
+    this.records = [];
+    return claimed;
+  }
+
+  async recordOutcomes(outcomes: OutboxOutcome[]): Promise<void> {
+    this.recorded.push(...outcomes);
+  }
+}
+
+const payload: SyncResourceJobPayload = {
+  syncItemId: 'item-1',
+  connectionId: 'conn-1',
+  provider: 'notion',
+  externalResourceId: 'page-1',
+  resourceType: 'page',
+  traceparent: '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01',
+  tracestate: 'vendor=value',
+};
 
 describe('SyncOutboxRelayService', () => {
-  let service: SyncOutboxRelayService;
-  let mockDataSource: Partial<DataSource>;
-  let mockPublisher: ISyncQueuePublisher;
-  let mockQueryBuilder: any;
-  let mockEntityManager: any;
+  const config = new AppConfigService(new ConfigService());
 
-  beforeEach(async () => {
-    mockQueryBuilder = {
-      setLock: jest.fn().mockReturnThis(),
-      setOnLocked: jest.fn().mockReturnThis(),
-      where: jest.fn().mockReturnThis(),
-      orderBy: jest.fn().mockReturnThis(),
-      take: jest.fn().mockReturnThis(),
-      getMany: jest.fn(),
-    };
+  it('publishes sync-resource jobs with the deterministic connection/resource id and preserved trace context', async () => {
+    const store = new FakeSyncOutboxStore([{ id: 'outbox-1', payload, attemptCount: 0 }]);
+    const queue = { add: jest.fn().mockResolvedValue({ id: 'job' }) };
+    const relay = new SyncOutboxRelayService(store, queue, config);
 
-    mockEntityManager = {
-      createQueryBuilder: jest.fn().mockReturnValue(mockQueryBuilder),
-      save: jest.fn().mockImplementation((entityClass, entity) => Promise.resolve(entity)),
-    };
+    await expect(relay.drainOnce()).resolves.toBe(1);
 
-    mockDataSource = {
-      transaction: jest.fn().mockImplementation(async (cb: any) => cb(mockEntityManager)),
-    };
-
-    mockPublisher = {
-      publishSyncJob: jest.fn().mockResolvedValue(undefined),
-    };
-
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        SyncOutboxRelayService,
-        { provide: DataSource, useValue: mockDataSource },
-        { provide: SYNC_QUEUE_PUBLISHER, useValue: mockPublisher },
-      ],
-    }).compile();
-
-    service = module.get<SyncOutboxRelayService>(SyncOutboxRelayService);
-  });
-
-  it('should return 0 when no pending outbox records exist', async () => {
-    mockQueryBuilder.getMany.mockResolvedValue([]);
-
-    const count = await service.pollAndPublish(10);
-    expect(count).toBe(0);
-    expect(mockPublisher.publishSyncJob).not.toHaveBeenCalled();
-  });
-
-  it('should publish pending events with deterministic job ID and inject trace context', async () => {
-    const mockEvent: Partial<ConnectorSyncOutboxEntity> = {
-      id: 'outbox-1',
-      connectionId: 'conn-1',
-      externalResourceId: 'page-abc',
-      eventType: 'SYNC_RESOURCE',
-      payload: { provider: 'notion', pageId: 'page-abc' },
-      status: 'pending',
-      attemptCount: 0,
-      createdAt: new Date(),
-    };
-
-    mockQueryBuilder.getMany.mockResolvedValue([mockEvent]);
-
-    const count = await service.pollAndPublish(10);
-    expect(count).toBe(1);
-
-    expect(mockPublisher.publishSyncJob).toHaveBeenCalledWith(
+    expect(queue.add).toHaveBeenCalledWith(
+      'sync-resource',
+      { ...payload, outboxEventId: 'outbox-1' },
       expect.objectContaining({
-        jobId: 'sync:conn-1:page-abc',
-        payload: expect.objectContaining({
-          provider: 'notion',
-          pageId: 'page-abc',
-          outboxEventId: 'outbox-1',
-        }),
+        jobId: 'sync:conn-1:page-1',
+        attempts: config.sync.jobAttempts,
+        removeOnFail: false,
       }),
     );
-
-    expect(mockEvent.status).toBe('published');
-    expect(mockEvent.publishedAt).toBeInstanceOf(Date);
-    expect(mockEntityManager.save).toHaveBeenCalledWith(ConnectorSyncOutboxEntity, mockEvent);
+    expect(store.recorded).toEqual([expect.objectContaining({ id: 'outbox-1', status: 'published' })]);
   });
 
-  it('should increment attempt count when publishing fails and mark failed after 5 attempts', async () => {
-    const mockEvent: Partial<ConnectorSyncOutboxEntity> = {
-      id: 'outbox-fail',
-      connectionId: 'conn-1',
-      externalResourceId: 'page-xyz',
-      payload: {},
-      status: 'pending',
-      attemptCount: 4,
-      createdAt: new Date(),
+  it('keeps a row pending for retry when Redis is unreachable', async () => {
+    const store = new FakeSyncOutboxStore([{ id: 'outbox-2', payload, attemptCount: 0 }]);
+    const queue = {
+      add: jest.fn().mockRejectedValue(Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' })),
     };
+    const relay = new SyncOutboxRelayService(store, queue, config);
 
-    mockQueryBuilder.getMany.mockResolvedValue([mockEvent]);
-    (mockPublisher.publishSyncJob as jest.Mock).mockRejectedValueOnce(new Error('Redis connection down'));
+    await relay.drainOnce();
 
-    const count = await service.pollAndPublish(10);
-    expect(count).toBe(1);
-    expect(mockEvent.attemptCount).toBe(5);
-    expect(mockEvent.status).toBe('failed');
-    expect(mockEntityManager.save).toHaveBeenCalledWith(ConnectorSyncOutboxEntity, mockEvent);
+    expect(store.recorded).toEqual([
+      expect.objectContaining({ id: 'outbox-2', status: 'pending', attemptCount: 1, lastError: 'connect ECONNREFUSED' }),
+    ]);
+  });
+
+  it('builds job ids that differ per connection for the same resource', () => {
+    expect(buildSyncJobId('conn-a', 'page-1')).not.toBe(buildSyncJobId('conn-b', 'page-1'));
   });
 });

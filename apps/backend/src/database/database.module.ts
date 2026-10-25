@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Global, Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppConfigModule, AppConfigService } from '../config';
 import {
@@ -8,8 +8,10 @@ import {
   DocumentChunk,
 } from '../entities';
 import { buildDataSourceOptions } from './data-source.options';
+import { TransactionRunner } from './transaction-runner';
 
-/* DatabaseModule encapsulates TypeORM connection pooling, entity registration, and startup migrations */
+/* DatabaseModule encapsulates TypeORM connection pooling, entity registration, startup migrations, and the shared transaction runner */
+@Global()
 @Module({
   imports: [
     TypeOrmModule.forRootAsync({
@@ -27,6 +29,7 @@ import { buildDataSourceOptions } from './data-source.options';
       DocumentChunk,
     ]),
   ],
-  exports: [TypeOrmModule],
+  providers: [TransactionRunner],
+  exports: [TypeOrmModule, TransactionRunner],
 })
 export class DatabaseModule {}

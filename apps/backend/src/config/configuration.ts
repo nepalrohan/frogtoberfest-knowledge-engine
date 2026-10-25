@@ -79,6 +79,23 @@ export interface AppConfiguration {
     /* Reuse of an identical standalone question's answer; 0 disables */
     answerCacheTtlSeconds: number;
   };
+  /* Transactional outbox relay polling, publishing, and dead-letter policy */
+  outbox: {
+    pollIntervalMs: number;
+    batchSize: number;
+    concurrency: number;
+    maxAttempts: number;
+    baseBackoffMs: number;
+    maxBackoffMs: number;
+    /* Claimed rows older than this are considered abandoned and become claimable again */
+    claimLeaseMs: number;
+  };
+  /* Connector resource sync worker and dead-letter queue */
+  sync: {
+    workerConcurrency: number;
+    jobAttempts: number;
+    dlqRetentionDays: number;
+  };
 }
 
 /* Loads raw environment configurations with fallbacks */
@@ -161,6 +178,20 @@ export const loadConfiguration = (): AppConfiguration => ({
   },
   chat: {
     answerCacheTtlSeconds: parseInt(process.env.CHAT_ANSWER_CACHE_TTL_SECONDS || '3600', 10),
+  },
+  outbox: {
+    pollIntervalMs: parseInt(process.env.OUTBOX_POLL_INTERVAL_MS || '1000', 10),
+    batchSize: parseInt(process.env.OUTBOX_BATCH_SIZE || '50', 10),
+    concurrency: parseInt(process.env.OUTBOX_CONCURRENCY || '10', 10),
+    maxAttempts: parseInt(process.env.OUTBOX_MAX_ATTEMPTS || '5', 10),
+    baseBackoffMs: parseInt(process.env.OUTBOX_BASE_BACKOFF_MS || '2000', 10),
+    maxBackoffMs: parseInt(process.env.OUTBOX_MAX_BACKOFF_MS || '60000', 10),
+    claimLeaseMs: parseInt(process.env.OUTBOX_CLAIM_LEASE_MS || '30000', 10),
+  },
+  sync: {
+    workerConcurrency: parseInt(process.env.SYNC_WORKER_CONCURRENCY || '2', 10),
+    jobAttempts: parseInt(process.env.SYNC_JOB_ATTEMPTS || '4', 10),
+    dlqRetentionDays: parseInt(process.env.SYNC_DLQ_RETENTION_DAYS || '14', 10),
   },
 });
 
@@ -333,6 +364,18 @@ export class AppConfigService {
   /* Chat turn behaviour */
   get chat(): AppConfiguration['chat'] {
     return this.configService.get<AppConfiguration['chat']>('app.chat') ?? loadConfiguration().chat;
+  }
+
+  /* Outbox relay polling and dead-letter policy */
+  get outbox(): AppConfiguration['outbox'] {
+    return (
+      this.configService.get<AppConfiguration['outbox']>('app.outbox') ?? loadConfiguration().outbox
+    );
+  }
+
+  /* Connector sync worker and dead-letter queue */
+  get sync(): AppConfiguration['sync'] {
+    return this.configService.get<AppConfiguration['sync']>('app.sync') ?? loadConfiguration().sync;
   }
 }
 

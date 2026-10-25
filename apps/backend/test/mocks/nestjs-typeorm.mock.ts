@@ -262,31 +262,31 @@ export class MockDataSource {
     });
 }
 
-class MockTypeOrmModule {}
-class MockTypeOrmFeatureModule {}
+/* Mirrors @nestjs/typeorm: every dynamic module is a TypeOrmModule so `exports: [TypeOrmModule]` resolves */
+export class TypeOrmModule {
+  static forRoot = jest.fn().mockImplementation(() => TypeOrmModule.rootModule());
 
-export const TypeOrmModule = {
-  forRoot: jest.fn().mockReturnValue({
-    module: MockTypeOrmModule,
-    global: true,
-    providers: [{ provide: DataSource, useClass: MockDataSource }],
-    exports: [{ provide: DataSource, useClass: MockDataSource }],
-  }),
-  forRootAsync: jest.fn().mockReturnValue({
-    module: MockTypeOrmModule,
-    global: true,
-    providers: [{ provide: DataSource, useClass: MockDataSource }],
-    exports: [{ provide: DataSource, useClass: MockDataSource }],
-  }),
-  forFeature: jest.fn().mockImplementation((entities: any[] = []) => {
+  static forRootAsync = jest.fn().mockImplementation(() => TypeOrmModule.rootModule());
+
+  static forFeature = jest.fn().mockImplementation((entities: any[] = []) => {
     const providers = (entities || []).map((entity) => ({
       provide: getRepositoryToken(entity),
       useFactory: () => new MockRepository(entity?.name || 'default'),
     }));
     return {
-      module: MockTypeOrmFeatureModule,
+      module: TypeOrmModule,
       providers,
       exports: providers,
     };
-  }),
-};
+  });
+
+  private static rootModule() {
+    const dataSourceProvider = { provide: DataSource, useClass: MockDataSource };
+    return {
+      module: TypeOrmModule,
+      global: true,
+      providers: [dataSourceProvider],
+      exports: [dataSourceProvider],
+    };
+  }
+}

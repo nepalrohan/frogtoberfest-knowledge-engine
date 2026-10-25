@@ -1,64 +1,103 @@
-import { Injectable, Optional, Inject } from '@nestjs/common';
-import { Processor, WorkerHost } from '@nestjs/bullmq';
-import { Job } from 'bullmq';
-import { Repository } from 'typeorm';
-import { InjectRepository } from '@nestjs/typeorm';
+import { Inject, Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Job, JobsOptions, UnrecoverableError, Worker } from 'bullmq';
+import { context } from '@opentelemetry/api';
 import {
-  ConnectorSyncItemEntity,
+  ConnectorSyncItemRepository,
   ConnectorSyncItemStatus,
   ConnectorPersistenceService,
   ConnectorConnectionStatus,
 } from '../../connector-persistence';
-import { NotionSyncProcessor } from '../connectors/notion/notion-sync.processor';
-import type { IDocumentStorageService } from '../services/document-storage-placeholder.service';
+import type { KnowledgeSyncProcessor } from '../interfaces/knowledge-sync-processor.interface';
 import {
   DOCUMENT_STORAGE_SERVICE,
-  DocumentStoragePlaceholderService,
-} from '../services/document-storage-placeholder.service';
+  type IDocumentStorageService,
+} from '../services/document-storage.service';
+import {
+  INGESTION_SYNC_DLQ_TOKEN,
+  INGESTION_SYNC_QUEUE_NAME,
+  type SyncDeadLetterPayload,
+  type SyncResourceJobPayload,
+} from '../../queue/queue.constants';
+import { Processor } from '../../queue/processor.decorator';
+import { AppConfigService } from '../../../config';
 import { TraceContextPropagator } from '../../../common/telemetry';
 import { StructuredLogger, LogEvents } from '../../../common/logger';
 import { ErrorClassifier } from '../../../common/resilience/error-classifier';
+import { isAuthRejection, toError } from '../../../common/resilience/error-utils';
 
-export interface SyncResourceJobPayload {
-  syncItemId: string;
-  connectionId: string;
-  provider: 'notion' | 'confluence';
-  externalResourceId: string;
-  resourceType: string;
-  traceparent?: string;
-  tracestate?: string;
-  [key: string]: unknown;
+/* Multi-provider token: every registered KnowledgeSyncProcessor, looked up by its provider name */
+export const KNOWLEDGE_SYNC_PROCESSORS = Symbol('KNOWLEDGE_SYNC_PROCESSORS');
+
+/* Minimal port for the dead-letter queue; a BullMQ Queue satisfies it structurally */
+export interface DeadLetterQueue {
+  add(name: string, data: SyncDeadLetterPayload, opts?: JobsOptions): Promise<unknown>;
 }
 
+/* Failed job surface the dead-letter handler relies on */
+type FailedSyncJob = Pick<Job<SyncResourceJobPayload>, 'id' | 'data' | 'attemptsMade' | 'opts' | 'remove'>;
+
 /* Background worker processing resource synchronization jobs from BullMQ */
-@Processor('ingestion-sync-queue')
+@Processor(INGESTION_SYNC_QUEUE_NAME)
 @Injectable()
-export class SyncResourceWorker extends WorkerHost {
-  private readonly logger = new StructuredLogger('SyncResourceWorker');
+export class SyncResourceWorker implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new StructuredLogger(SyncResourceWorker.name);
+  private readonly processors: Map<string, KnowledgeSyncProcessor>;
+  private worker?: Worker<SyncResourceJobPayload>;
 
   constructor(
-    @InjectRepository(ConnectorSyncItemEntity)
-    private readonly syncItemRepo: Repository<ConnectorSyncItemEntity>,
-    private readonly notionProcessor: NotionSyncProcessor,
+    private readonly syncItems: ConnectorSyncItemRepository,
+    @Inject(KNOWLEDGE_SYNC_PROCESSORS)
+    processors: KnowledgeSyncProcessor[],
     private readonly persistenceService: ConnectorPersistenceService,
-    @Optional()
     @Inject(DOCUMENT_STORAGE_SERVICE)
-    private readonly docStorage: IDocumentStorageService = new DocumentStoragePlaceholderService(),
+    private readonly docStorage: IDocumentStorageService,
+    @Inject(INGESTION_SYNC_DLQ_TOKEN)
+    private readonly deadLetters: DeadLetterQueue,
+    private readonly config: AppConfigService,
   ) {
-    super();
+    this.processors = new Map(processors.map((processor) => [processor.provider, processor]));
   }
 
-  /* Main BullMQ job execution handler */
-  async process(job: Job<SyncResourceJobPayload>): Promise<any> {
-    return this.processJobData(job.data);
+  onModuleInit(): void {
+    const redis = this.config.redis;
+    this.worker = new Worker<SyncResourceJobPayload>(
+      INGESTION_SYNC_QUEUE_NAME,
+      (job: Job<SyncResourceJobPayload>) => this.process(job),
+      {
+        connection: {
+          host: redis.host,
+          port: redis.port,
+          password: redis.password,
+          maxRetriesPerRequest: null,
+        },
+        concurrency: this.config.sync.workerConcurrency,
+      },
+    );
+
+    this.worker.on('failed', (job, error) => {
+      if (job) {
+        void this.handleFailedJob(job, error);
+      }
+    });
+
+    this.logger.log('SyncResourceWorker initialized and listening for jobs');
+  }
+
+  async onModuleDestroy(): Promise<void> {
+    if (this.worker) {
+      await this.worker.close();
+    }
+  }
+
+  /* BullMQ entry point; runs the job inside the trace context captured at selection time */
+  process(job: Job<SyncResourceJobPayload>): Promise<void> {
+    const traceCtx = TraceContextPropagator.extractFromCarrier(job.data);
+    return context.with(traceCtx, () => this.processJobData(job.data));
   }
 
   /* Process execution logic decoupled for direct testing and job runs */
   async processJobData(data: SyncResourceJobPayload): Promise<void> {
     const { syncItemId, connectionId, provider, externalResourceId } = data;
-
-    /* Extract trace context from job payload */
-    const traceCtx = TraceContextPropagator.extractFromCarrier(data);
 
     this.logger.info(LogEvents.INGESTION_SYNC_STARTED, {
       syncItemId,
@@ -67,17 +106,12 @@ export class SyncResourceWorker extends WorkerHost {
       externalResourceId,
     });
 
-    /* 1. Fetch current sync item */
-    const syncItem = await this.syncItemRepo.findOne({
-      where: { id: syncItemId },
-    });
-
+    const syncItem = await this.syncItems.findById(syncItemId);
     if (!syncItem) {
       this.logger.warn('Sync item not found, skipping job', { syncItemId });
       return;
     }
 
-    /* 2. Check if deselected prior to processing */
     if (syncItem.status === ConnectorSyncItemStatus.DESELECTED) {
       this.logger.info('Resource deselected, aborting sync job', {
         syncItemId,
@@ -86,48 +120,30 @@ export class SyncResourceWorker extends WorkerHost {
       return;
     }
 
-    /* 3. Mark syncing status */
     syncItem.status = ConnectorSyncItemStatus.SYNCING;
     syncItem.attemptCount += 1;
-    await this.syncItemRepo.save(syncItem);
+    await this.syncItems.save(syncItem);
 
     try {
-      /* 4. Delegate to provider processor */
-      let result;
-      if (provider === 'notion') {
-        result = await this.notionProcessor.syncResource({
-          connectionId,
-          externalResourceId,
-          lastObservedRevision: syncItem.lastObservedRevision,
-          lastProcessedFingerprint: syncItem.lastProcessedFingerprint,
-        });
-      } else {
+      const processor = this.processors.get(provider);
+      if (!processor) {
         throw new Error(`Unsupported sync provider: ${provider}`);
       }
 
-      /* 5. Check if deselected during in-flight processing */
-      const freshItem = await this.syncItemRepo.findOne({
-        where: { id: syncItemId },
+      const result = await processor.syncResource({
+        connectionId,
+        externalResourceId,
+        lastObservedRevision: syncItem.lastObservedRevision,
+        lastProcessedFingerprint: syncItem.lastProcessedFingerprint,
       });
 
-      if (!freshItem || freshItem.status === ConnectorSyncItemStatus.DESELECTED) {
-        this.logger.info('Resource deselected during processing, discarding result', {
-          syncItemId,
-          externalResourceId,
-        });
-        return;
+      if (result.status === 'FAILED') {
+        throw result.error ?? new Error('Sync execution failed');
       }
 
-      /* 6. Process result */
       if (result.status === 'NO_OP') {
-        freshItem.status = ConnectorSyncItemStatus.COMPLETED;
-        freshItem.lastSyncedAt = new Date();
-        if (result.observedRevision) {
-          freshItem.lastObservedRevision = result.observedRevision;
-        }
-        freshItem.lastError = null;
-        await this.syncItemRepo.save(freshItem);
-
+        /* Skips the update itself when the item was deselected mid-flight */
+        await this.syncItems.markUnchanged(syncItemId, result.observedRevision);
         this.logger.info('No-op sync completed for unchanged resource', {
           syncItemId,
           externalResourceId,
@@ -135,81 +151,108 @@ export class SyncResourceWorker extends WorkerHost {
         return;
       }
 
-      if (result.status === 'UPDATED' && result.normalizedPayload) {
-        /* Persist to document storage */
-        await this.docStorage.saveDocument(result.normalizedPayload);
-
-        freshItem.status = ConnectorSyncItemStatus.COMPLETED;
-        freshItem.lastSyncedAt = new Date();
-        if (result.observedRevision) {
-          freshItem.lastObservedRevision = result.observedRevision;
-        }
-        if (result.contentFingerprint) {
-          freshItem.lastProcessedFingerprint = result.contentFingerprint;
-        }
-        freshItem.lastError = null;
-        await this.syncItemRepo.save(freshItem);
-
-        this.logger.info('Updated document and completed sync', {
-          syncItemId,
-          externalResourceId,
-          contentFingerprint: result.contentFingerprint,
-        });
-        return;
+      if (!result.normalizedPayload) {
+        throw new Error('Sync processor reported UPDATED without a normalized payload');
       }
 
-      if (result.status === 'FAILED') {
-        throw result.error || new Error('Sync execution failed');
-      }
-    } catch (error: any) {
-      const category = ErrorClassifier.classify(error);
-      const isAuthError =
-        error?.status === 401 ||
-        error?.statusCode === 401 ||
-        String(error?.message || '').toLowerCase().includes('unauthorized') ||
-        String(error?.message || '').toLowerCase().includes('invalid_grant');
-
-      const freshItem = await this.syncItemRepo.findOne({
-        where: { id: syncItemId },
+      /* Deselection, stale-revision and version checks happen atomically inside the storage transaction */
+      const publication = await this.docStorage.publishSyncedDocument({
+        syncItemId,
+        payload: result.normalizedPayload,
+        observedRevision: result.observedRevision,
+        contentFingerprint: result.contentFingerprint,
       });
 
-      if (freshItem) {
-        freshItem.lastError = {
-          message: error?.message || String(error),
-          category,
-          timestamp: new Date().toISOString(),
-        };
-
-        if (isAuthError) {
-          freshItem.status = ConnectorSyncItemStatus.FAILED;
-          await this.syncItemRepo.save(freshItem);
-
-          /* Mark connection as requiring reauthorization */
-          await this.persistenceService.updateStatus(
-            provider,
-            ConnectorConnectionStatus.REAUTH_REQUIRED,
-          );
-          this.logger.warn('Connection transitioned to REAUTH_REQUIRED due to auth failure', {
-            provider,
-            connectionId,
-          });
-          return;
-        }
-
-        freshItem.status = ConnectorSyncItemStatus.FAILED;
-        await this.syncItemRepo.save(freshItem);
-      }
-
-      this.logger.error(LogEvents.INGESTION_SYNC_FAILED, error?.stack, {
+      this.logger.info(LogEvents.INGESTION_SYNC_COMPLETED, {
         syncItemId,
         externalResourceId,
-        category,
+        outcome: publication.outcome,
+        documentId: publication.documentId,
+        versionId: publication.version === undefined ? undefined : String(publication.version),
+        contentFingerprint: result.contentFingerprint,
       });
+    } catch (error: unknown) {
+      await this.recordFailure(data, error);
+    }
+  }
 
-      /* Re-throw retryable errors to trigger BullMQ backoff */
-      if (ErrorClassifier.isRetryable(error)) {
-        throw error;
-      }
+  /* Persists the failure, then rethrows retryable errors for BullMQ backoff and stops retries for everything else */
+  private async recordFailure(data: SyncResourceJobPayload, error: unknown): Promise<never> {
+    const { syncItemId, connectionId, provider, externalResourceId } = data;
+    const category = ErrorClassifier.classify(error);
+    const failure = toError(error);
+    const authRejected = isAuthRejection(error);
+
+    const freshItem = await this.syncItems.findById(syncItemId);
+    if (freshItem && freshItem.status !== ConnectorSyncItemStatus.DESELECTED) {
+      freshItem.status = ConnectorSyncItemStatus.FAILED;
+      freshItem.lastError = {
+        message: failure.message,
+        category,
+        timestamp: new Date().toISOString(),
+      };
+      await this.syncItems.save(freshItem);
+    }
+
+    this.logger.logError(LogEvents.INGESTION_SYNC_FAILED, failure, {
+      syncItemId,
+      externalResourceId,
+      errorType: category,
+    });
+
+    if (authRejected) {
+      await this.persistenceService.updateStatus(provider, ConnectorConnectionStatus.REAUTH_REQUIRED);
+      this.logger.warn('Connection transitioned to REAUTH_REQUIRED due to auth failure', {
+        provider,
+        connectionId,
+      });
+      throw new UnrecoverableError(failure.message);
+    }
+
+    if (ErrorClassifier.isRetryable(error)) {
+      throw failure;
+    }
+    throw new UnrecoverableError(failure.message);
+  }
+
+  /* Moves a job that will never run again into the DLQ and removes it so its deterministic id can be reused */
+  async handleFailedJob(job: FailedSyncJob, error: Error): Promise<void> {
+    const maxAttempts = job.opts.attempts ?? 1;
+    const isFinal = error instanceof UnrecoverableError || job.attemptsMade >= maxAttempts;
+    if (!isFinal) {
+      return;
+    }
+
+    const failedAt = new Date();
+    const deadLetter: SyncDeadLetterPayload = {
+      originalJobId: String(job.id),
+      payload: job.data,
+      errorMessage: error.message,
+      errorCategory: error instanceof UnrecoverableError ? 'PERMANENT' : ErrorClassifier.classify(error),
+      attemptsMade: job.attemptsMade,
+      failedAt: failedAt.toISOString(),
+      traceparent: job.data.traceparent,
+      tracestate: job.data.tracestate,
+    };
+
+    try {
+      /* BullMQ accepts colon ids only with exactly three segments, so key the entry by the sync item */
+      await this.deadLetters.add('sync-dead-letter', deadLetter, {
+        jobId: `dlq:${job.data.syncItemId}:${failedAt.getTime()}`,
+      });
+      await job.remove();
+      this.logger.warnEvent(LogEvents.SYNC_JOB_DEAD_LETTERED, {
+        jobId: deadLetter.originalJobId,
+        syncItemId: job.data.syncItemId,
+        errorType: deadLetter.errorCategory,
+        attempt: job.attemptsMade,
+      });
+    } catch (dlqError: unknown) {
+      /* The job stays in the failed set so nothing is lost; re-selection stays blocked until it is cleared */
+      this.logger.logError(LogEvents.SYNC_JOB_DLQ_WRITE_FAILED, dlqError, {
+        jobId: deadLetter.originalJobId,
+        syncItemId: job.data.syncItemId,
+      });
     }
   }
 }

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Injectable,
   InternalServerErrorException,
   Logger,
@@ -11,7 +12,6 @@ import {
   ConnectorCredentialEntity,
   ConnectorSyncItemEntity,
   ConnectorSyncItemStatus,
-  ConnectorSyncOutboxEntity,
 } from './entities';
 import {
   ConnectorAuthType,
@@ -22,6 +22,8 @@ import {
 } from './interfaces/connector-connection.interface';
 import { CredentialEncryptionService } from './credential-encryption.service';
 import { TraceContextPropagator } from '../../common/telemetry';
+import { ConnectorSyncOutboxRepository } from './repositories/connector-sync-outbox.repository';
+import { isSyncProvider, type SyncResourceJobPayload } from '../queue/queue.constants';
 
 /* Core persistence service managing durable connections, encrypted credentials, and multi-connector lifecycle */
 @Injectable()
@@ -35,8 +37,7 @@ export class ConnectorPersistenceService {
     private readonly credentialRepo: Repository<ConnectorCredentialEntity>,
     @InjectRepository(ConnectorSyncItemEntity)
     private readonly syncItemRepo: Repository<ConnectorSyncItemEntity>,
-    @InjectRepository(ConnectorSyncOutboxEntity)
-    private readonly outboxRepo: Repository<ConnectorSyncOutboxEntity>,
+    private readonly syncOutboxRepository: ConnectorSyncOutboxRepository,
     private readonly encryptionService: CredentialEncryptionService,
     private readonly dataSource: DataSource,
   ) { }
@@ -291,6 +292,9 @@ export class ConnectorPersistenceService {
     resourceType = 'page',
   ): Promise<{ syncJobId: string; selectedCount: number; selectedPageIds: string[] }> {
     const uniquePages = Array.from(new Set(pageIds));
+    if (!isSyncProvider(provider)) {
+      throw new BadRequestException(`Provider ${provider} does not support resource sync`);
+    }
 
     return this.dataSource.transaction(async (manager) => {
       const connection = await manager.findOne(ConnectorConnectionEntity, {
@@ -347,7 +351,7 @@ export class ConnectorPersistenceService {
         }
 
         /* Record transactional outbox event with trace context propagation */
-        const outboxPayload: Record<string, any> = {
+        const outboxPayload: SyncResourceJobPayload = {
           syncItemId: item.id,
           connectionId: connection.id,
           provider,
@@ -355,17 +359,7 @@ export class ConnectorPersistenceService {
           resourceType,
         };
         TraceContextPropagator.injectToCarrier(outboxPayload);
-
-        const outboxEvent = manager.create(ConnectorSyncOutboxEntity, {
-          connectionId: connection.id,
-          externalResourceId: pageId,
-          eventType: 'SYNC_RESOURCE',
-          payload: outboxPayload,
-          status: 'pending',
-          attemptCount: 0,
-          createdAt: now,
-        });
-        await manager.save(ConnectorSyncOutboxEntity, outboxEvent);
+        await this.syncOutboxRepository.enqueue(outboxPayload, manager);
       }
 
       /* Mark unselected resources as DESELECTED */

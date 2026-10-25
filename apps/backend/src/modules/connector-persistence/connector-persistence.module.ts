@@ -14,6 +14,8 @@ import {
 import { OAuthStateService } from './oauth-state.service';
 import { ConnectorPersistenceService } from './connector-persistence.service';
 import { SyncOutboxRelayService } from './sync-outbox.relay';
+import { QueueModule } from '../queue/queue.module';
+import { ConnectorSyncItemRepository, ConnectorSyncOutboxRepository } from './repositories';
 import {
   ConnectorPersistenceAsyncOptions,
   ConnectorPersistenceOptions,
@@ -24,6 +26,7 @@ import {
 @Global()
 @Module({
   imports: [
+    QueueModule,
     TypeOrmModule.forFeature([
       ConnectorConnectionEntity,
       ConnectorCredentialEntity,
@@ -37,8 +40,12 @@ import {
     OAuthStateService,
     ConnectorPersistenceService,
     SyncOutboxRelayService,
+    ConnectorSyncItemRepository,
+    ConnectorSyncOutboxRepository,
   ],
   exports: [
+    ConnectorSyncItemRepository,
+    ConnectorSyncOutboxRepository,
     ConnectorPersistenceService,
     CredentialEncryptionService,
     OAuthStateService,

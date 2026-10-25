@@ -9,6 +9,7 @@ import {
   Index,
 } from 'typeorm';
 import { ConnectorConnectionEntity } from './connector-connection.entity';
+import type { ErrorCategory } from '../../../common/resilience/error-classifier';
 
 /* Lifecycle states for tracked external resources */
 export enum ConnectorSyncItemStatus {
@@ -17,6 +18,13 @@ export enum ConnectorSyncItemStatus {
   COMPLETED = 'COMPLETED',
   FAILED = 'FAILED',
   DESELECTED = 'DESELECTED',
+}
+
+/* Last failure recorded against a sync item */
+export interface SyncItemError {
+  message: string;
+  category: ErrorCategory;
+  timestamp: string;
 }
 
 /* Durable entity tracking the synchronization state of a single selected external resource */
@@ -75,7 +83,7 @@ export class ConnectorSyncItemEntity {
   lastProcessedFingerprint: string | null;
 
   @Column({ name: 'last_error', type: 'jsonb', nullable: true })
-  lastError: Record<string, any> | null;
+  lastError: SyncItemError | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
