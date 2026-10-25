@@ -36,6 +36,8 @@ The sync pipeline doesn't depend on any one provider. A connector only supplies 
 | Source | Status | Type |
 | --- | --- | --- |
 | Notion | ✅ Implemented | OAuth connector, pages synced as resources |
+| File upload | ✅ Implemented | Direct ingestion of `.md` / `.txt` files (`POST /api/v1/upload`); PDFs are accepted but not parsed yet |
+| Structured text feed | ✅ Implemented | Direct ingestion of JSON `{ title, content, sourceId?, sourceUrl?, metadata? }` (`POST /api/v1/feed-knowledge`) |
 | Confluence | 🗺️ Planned | Connector (provider type already reserved) |
 
 **Adding a connector** (`apps/backend/src/modules/`):
